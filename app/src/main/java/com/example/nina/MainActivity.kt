@@ -125,6 +125,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     val stackSize = navigationStack.size
 
                     var sidebarRect by remember { mutableStateOf(value = Rect.Zero) }
+                    var quickFiresRect by remember { mutableStateOf(value = Rect.Zero) }
                     val gridCellsBounds = remember { mutableMapOf<AACCell, Rect>() }
                     val dndState = LocalDragAndDropState.current
                     
@@ -187,14 +188,22 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         val target = dndState.currentTargetCell
                         val mode = dndState.currentDropMode
 
-                        // 1. Est-ce qu'on lâche dans la barre de gauche ?
+                        // 1. Est-ce qu'on lâche dans la barre de gauche (Core Words) ?
                         if (sidebarRect.contains(screenPos)) {
                             if (!coreWords.any { it.label == droppedCell.label }) {
                                 coreWords.add(droppedCell.copy(isQuickPhrase = false))
                                 saveCoreWords(coreWords)
                             }
-                        } else if (target != null && target != droppedCell) {
-                            // 2. Logique d'Advanced Drop (Swap / Insert)
+                        } 
+                        // 2. Est-ce qu'on lâche dans la barre de droite (Quick Fires) ?
+                        else if (quickFiresRect.contains(screenPos)) {
+                            if (!quickFires.any { it.label == droppedCell.label }) {
+                                quickFires.add(droppedCell.copy(isQuickPhrase = true))
+                                saveQuickFires(quickFires)
+                            }
+                        }
+                        else if (target != null && target != droppedCell) {
+                            // 3. Logique d'Advanced Drop (Swap / Insert)
                             val draggedIndex = currentButtons.indexOf(droppedCell)
                             val targetIndex = currentButtons.indexOf(target)
                             
@@ -211,7 +220,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                         if (mode == DropTargetMode.INSERT_AFTER) {
                                             newTargetIndex += 1
                                         }
-                                        currentButtons.add(newTargetIndex, droppedCell)
+                                        currentButtons.add(newTargetIndex, droppedCell.copy(isQuickPhrase = false))
                                     }
                                     else -> {}
                                 }
@@ -366,26 +375,37 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             .fillMaxHeight()
                                             .onGloballyPositioned { sidebarRect = it.boundsInRoot() }
                                             .background(Color(0xFFF5F5F5), RoundedCornerShape(16.dp))
-                                            .verticalScroll(rememberScrollState())
+                                            .verticalScroll(rememberScrollState(), enabled = !dndState.isDragging)
                                             .padding(bottom = 16.dp),
                                         verticalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
                                         coreWords.forEach { cell ->
-                                            AACCellView(
-                                                cell = cell, haptic = haptic, debounceTime = debounceTime,
-                                                isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode,
-                                                onClick = {
-                                                    if (isEditMode) {
-                                                        cellToEdit = cell
-                                                        showEditDialog = true
-                                                    } else {
-                                                        speakText(cell.label, voicePitch, voiceRate)
-                                                        trackWordUsage(cell, context, { usageStats = it })
-                                                        if (!cell.isQuickPhrase) phrase.add(cell)
-                                                    }
-                                                },
-                                                onLongClick = { if (isAdminMode && !isEditMode) { cellToEdit = cell; showEditDialog = true } }
-                                            )
+                                            var posInRoot by remember { mutableStateOf(Offset.Zero) }
+                                            DraggableCellWrapper(cell = cell) {
+                                                Box(modifier = Modifier.onGloballyPositioned { posInRoot = it.positionInRoot() }) {
+                                                    AACCellView(
+                                                        cell = cell, haptic = haptic, debounceTime = debounceTime,
+                                                        isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode,
+                                                        onClick = {
+                                                            if (isEditMode) {
+                                                                cellToEdit = cell
+                                                                showEditDialog = true
+                                                            } else {
+                                                                speakText(cell.label, voicePitch, voiceRate)
+                                                                trackWordUsage(cell, context, { usageStats = it })
+                                                                if (!cell.isQuickPhrase) phrase.add(cell)
+                                                            }
+                                                        },
+                                                        onLongClick = {
+                                                            if (isAdminMode) {
+                                                                dndState.draggedCell = cell
+                                                                dndState.dragOffset = posInRoot
+                                                                dndState.isDragging = true
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                            }
                                         }
 
                                         if (isAdminMode) {
@@ -446,7 +466,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                                     }
                                                                 },
                                                                 onLongClick = {
-                                                                    if (isAdminMode && !isEditMode) {
+                                                                    if (isAdminMode) {
                                                                         dndState.draggedCell = cell
                                                                         dndState.dragOffset = posInRoot
                                                                         dndState.isDragging = true
@@ -516,24 +536,36 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
-                                        .verticalScroll(rememberScrollState()),
+                                        .onGloballyPositioned { quickFiresRect = it.boundsInRoot() }
+                                        .verticalScroll(rememberScrollState(), enabled = !dndState.isDragging),
                                     verticalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
                                     quickFires.forEach { cell ->
-                                        AACCellView(
-                                            cell = cell, haptic = haptic, debounceTime = debounceTime,
-                                            isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode,
-                                            onClick = {
-                                                if (isEditMode) {
-                                                    cellToEdit = cell
-                                                    showEditDialog = true
-                                                } else {
-                                                    speakText(cell.label, voicePitch, voiceRate)
-                                                    trackWordUsage(cell, context, { usageStats = it })
-                                                }
-                                            },
-                                            onLongClick = { if (isAdminMode && !isEditMode) { cellToEdit = cell; showEditDialog = true } }
-                                        )
+                                        var posInRoot by remember { mutableStateOf(Offset.Zero) }
+                                        DraggableCellWrapper(cell = cell) {
+                                            Box(modifier = Modifier.onGloballyPositioned { posInRoot = it.positionInRoot() }) {
+                                                AACCellView(
+                                                    cell = cell, haptic = haptic, debounceTime = debounceTime,
+                                                    isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode,
+                                                    onClick = {
+                                                        if (isEditMode) {
+                                                            cellToEdit = cell
+                                                            showEditDialog = true
+                                                        } else {
+                                                            speakText(cell.label, voicePitch, voiceRate)
+                                                            trackWordUsage(cell, context, { usageStats = it })
+                                                        }
+                                                    },
+                                                    onLongClick = {
+                                                        if (isAdminMode) {
+                                                            dndState.draggedCell = cell
+                                                            dndState.dragOffset = posInRoot
+                                                            dndState.isDragging = true
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
                                     }
 
                                     if (isAdminMode) {
