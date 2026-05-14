@@ -1,16 +1,17 @@
 plugins {
     alias(libs.plugins.android.application)
+    //id("org.jetbrains.kotlin.android") // 🟢 Retour à la normale
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
     namespace = "com.example.nina"
-    compileSdk = 35 // On monte à 35 pour satisfaire les dépendances récentes
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.nina"
-        minSdk = 24
-        targetSdk = 35 // Aligné sur le compileSdk
+        minSdk = 26
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -28,8 +29,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     kotlin {
@@ -38,6 +39,10 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    androidResources {
+        noCompress += "tflite"
     }
 }
 
@@ -52,14 +57,15 @@ dependencies {
     implementation(libs.androidx.compose.material3)
 
     // --- RÉSEAU ET IMAGES ---
-    implementation("io.coil-kt:coil-compose:2.6.0")
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.google.code.gson:gson:2.10.1")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    implementation("com.google.code.gson:gson:2.11.0")
 
     // --- ICONES ---
-    implementation("androidx.compose.material:material-icons-extended:1.6.0")
-    implementation(libs.androidx.ui)
+    implementation("androidx.compose.material:material-icons-extended")
+
+    // --- IA ET NLP ---
 
     // --- TESTS ---
     testImplementation(libs.junit)

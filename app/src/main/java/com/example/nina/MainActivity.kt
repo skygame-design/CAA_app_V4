@@ -1,5 +1,6 @@
 package com.example.nina
 
+import android.Manifest
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
@@ -9,13 +10,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.*
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -23,815 +20,823 @@ import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.example.nina.ui.theme.NinaTheme
-import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
-import kotlinx.coroutines.launch
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.GET
-import retrofit2.http.Header
-import retrofit2.http.Path
-import retrofit2.http.Query
-import java.util.*
-import kotlin.getValue
-import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import retrofit2.http.Headers
 import java.io.File
-import java.io.FileOutputStream
-import java.net.URL
-import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.platform.LocalHapticFeedback
-import android.media.MediaRecorder
-import android.os.Build
-import androidx.compose.foundation.gestures.detectTapGestures
+import java.util.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import android.Manifest
-//import androidx.compose.material3.not
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import android.util.Log
 
-
-// --- MODÈLE DE DONNÉES ---
-class AudioRecorder(private val context: Context) {
-    private var recorder: MediaRecorder? = null
-
-    fun startRecording(fileName: String): String {
-        val file = File(context.filesDir, "$fileName.3gp")
-        try {
-            recorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(context)
-            } else {
-                MediaRecorder()
-            }).apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
-                setOutputFile(file.absolutePath)
-                prepare()
-                start()
-            }
-            println("ENREGISTREMENT DÉMARRÉ : ${file.absolutePath}")
-        } catch (e: Exception) {
-            println("ERREUR MICRO : ${e.message}") // C'est ici qu'on verra le vrai souci
-            e.printStackTrace()
-        }
-        return file.absolutePath
-    }
-
-    fun stopRecording() {
-        recorder?.apply {
-            stop()
-            release()
-        }
-        recorder = null
-        // Vérification :
-        val file = File(context.filesDir, "dernier_enregistrement.3gp") // Adapte au nom utilisé
-        println("Fichier audio créé : ${file.exists()} à l'emplacement ${file.absolutePath}")
-    }
-}
-
-// 1. Les modèles de données
-data class ArasaacSearchResponse(val _id: Int)
-
-data class OpenSymbolResponse(
-    val name: String? = null,
-    @SerializedName("image_url") // Indispensable pour OpenSymbols
-    val imageUrl: String? = null
-)
-
-// 2. Les interfaces de services
-interface ArasaacService {
-    // On enlève le slash au début du GET pour qu'il s'ajoute bien à la baseUrl
-    @GET("fr/search/{label}")
-    suspend fun searchPictograms(@Path("label") label: String): List<ArasaacSearchResponse>
-}
-
-
-
-// 3. L'instance Retrofit unique avec les deux clients
-// 3. L'instance Retrofit unique
-object RetrofitInstance {
-    private val client = okhttp3.OkHttpClient.Builder()
-        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-        .build()
-
-    val arasaacApi: ArasaacService by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://api.arasaac.org/api/pictograms/")
-            .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(ArasaacService::class.java)
-    }
-}
-
-    // Service pour ARASAAC
-    val arasaacApi: ArasaacService by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://api.arasaac.org/api/pictograms/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(ArasaacService::class.java)
-    }
-
-
-
-
+/**
+ * Activité principale de l'application Nina.
+ * Gère l'initialisation du TTS, le chargement des données, et l'interface utilisateur globale.
+ */
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            println("Micro autorisé !")
-        } else {
-            println("Micro refusé...")
-        }
-    }
+    // Permission pour l'enregistrement audio des pictos personnalisés
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     private var tts: TextToSpeech? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Initialisation de la synthèse vocale
         tts = TextToSpeech(this, this)
-        requestPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+        requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
 
         setContent {
-            NinaTheme {
-                val context = LocalContext.current
-                val haptic = LocalHapticFeedback.current
-                val boutons = remember { mutableStateListOf<AACCell>().apply { addAll(loadButtons()) } }
-                val phrase = remember { mutableStateListOf<AACCell>() }
-                val navigationStack = remember { mutableStateListOf<AACCell>() }
+            DragAndDropRoot {
+                NinaTheme {
+                    val context = LocalContext.current
+                    val haptic = LocalHapticFeedback.current
+                    val scope = rememberCoroutineScope()
+                    
+                    // --- ÉTATS RÉACTIFS ---
+                    
+                    // Listes principales des pictogrammes
+                    val boutons = remember { mutableStateListOf<AACCell>().apply { addAll(loadButtons()) } }
+                    val phrase = remember { mutableStateListOf<AACCell>() }
+                    val navigationStack = remember { mutableStateListOf<AACCell>() } // Pile de navigation pour les dossiers
+                    val coreWords = remember { mutableStateListOf<AACCell>().apply { addAll(loadCoreWords()) } } // Barre de gauche
+                    val quickFires = remember { mutableStateListOf<AACCell>().apply { addAll(loadQuickFires()) } } // Barre de droite
 
-                var columnCount by remember { mutableIntStateOf(4) }
-                var showAddDialog by remember { mutableStateOf(false) }
-                var showEditDialog by remember { mutableStateOf(false) }
-                var cellToEdit by remember { mutableStateOf<AACCell?>(null) }
-                var isAdminMode: Boolean by remember { mutableStateOf(false) }
-                var showMenu by remember { mutableStateOf(false) }
+                    // Configuration et Dialogues
+                    var columnCount by remember { mutableIntStateOf(4) }
+                    var showAddDialog by remember { mutableStateOf(false) }
+                    var showEditDialog by remember { mutableStateOf(false) }
+                    var showKeyboardDialog by remember { mutableStateOf(false) }
+                    var cellToEdit by remember { mutableStateOf<AACCell?>(null) }
+                    var isAdminMode by remember { mutableStateOf(false) }
+                    var showAdminChallengeDialog by remember { mutableStateOf(false) }
+                    var showMenu by remember { mutableStateOf(false) }
+                    var backgroundColor by remember { mutableLongStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getLong("bg_color", 0xFFFAF3E0)) }
+                    var isCviMode by remember { mutableStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getBoolean("cvi_mode", false)) }
+                    var showSettingsDialog by remember { mutableStateOf(false) }
+                    var showHelpDialog by remember { mutableStateOf(false) }
 
-                val currentButtons = if (navigationStack.isEmpty()) boutons else navigationStack.last().content
-                val stackSize = navigationStack.size
+                    var isEditMode by remember { mutableStateOf(false) }
 
-                val createDocLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-                    uri?.let {
-                        context.contentResolver.openOutputStream(it)?.use { stream ->
-                            val json = Gson().toJson(boutons.toList())
-                            stream.write(json.toByteArray())
+                    var isAddingToCore by remember { mutableStateOf(false) }
+                    var isAddingToQuickFires by remember { mutableStateOf(false) }
+
+                    var offsetX by remember { mutableFloatStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getFloat("offset_x", 0f)) }
+                    var offsetY by remember { mutableFloatStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getFloat("offset_y", 0f)) }
+                    var showCalibration by remember { mutableStateOf(false) }
+                    var showWordFinder by remember { mutableStateOf(false) }
+
+                    var voicePitch by remember { mutableFloatStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getFloat("voice_pitch", 1.2f)) }
+                    var voiceRate by remember { mutableFloatStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getFloat("voice_rate", 0.85f)) }
+                    var debounceTime by remember { mutableLongStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getLong("debounce_time", 500L)) }
+
+                    var isKioskMode by remember { mutableStateOf(false) }
+                    val activity = context as? android.app.Activity
+
+                    var usageStats by remember { mutableStateOf(loadStats(context)) }
+                    var showStatsDialog by remember { mutableStateOf(false) }
+
+                    // Détermine les boutons à afficher selon si on est dans un dossier ou non
+                    val currentButtons = if (navigationStack.isEmpty()) boutons else navigationStack.last().content
+                    val stackSize = navigationStack.size
+
+                    var sidebarRect by remember { mutableStateOf(value = Rect.Zero) }
+                    val gridCellsBounds = remember { mutableMapOf<AACCell, Rect>() }
+                    val dndState = LocalDragAndDropState.current
+                    
+                    val gridState = rememberLazyGridState()
+                    var gridRect by remember { mutableStateOf(Rect.Zero) }
+                    
+                    val screenHeight = context.resources.displayMetrics.heightPixels.toFloat()
+
+                    // --- LOGIQUE D'INITIALISATION ---
+                    
+                    // --- RÉCUPÉRATION DES IMAGES MANQUANTES (Pictos ARASAAC) ---
+                    LaunchedEffect(Unit) {
+                        withContext(Dispatchers.IO) {
+                            // Mise à jour asynchrone pour les boutons qui ont le flag "FETCH"
+                            updateCellsWithImages(boutons, coreWords, quickFires)
                         }
                     }
-                }
 
-                val openDocLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-                    uri?.let {
-                        context.contentResolver.openInputStream(it)?.reader()?.use { reader ->
-                            val json = reader.readText()
-                            val type = object : TypeToken<List<AACCell>>() {}.type
-                            val imported: List<AACCell> = Gson().fromJson(json, type)
-                            boutons.clear()
-                            boutons.addAll(imported)
-                        }
-                    }
-                }
-
-                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF5F7FA)) {
-                    Row(modifier = Modifier.fillMaxSize()) {
-                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-
-                            // BARRE SUPÉRIEURE : LECTURE À GAUCHE, RETOUR À DROITE
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // 1. BOUTON LECTURE (À GAUCHE)
-                                IconButton(
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        speakFullSentence(phrase)
-                                    },
-                                    enabled = phrase.isNotEmpty(),
-                                    modifier = Modifier
-                                        .size(90.dp)
-                                        .background(if (phrase.isNotEmpty()) Color(0xFF4CAF50) else Color(0xFFE0E0E0), CircleShape)
-                                        .border(4.dp, Color.White, CircleShape)
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(60.dp))
-                                }
-
-                                // 2. BARRE DE PHRASE (CENTRE)
-                                Box(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                                    SentenceBar(
-                                        sentence = phrase,
-                                        onClear = { phrase.clear() },
-                                        haptic = haptic
+                    // --- GESTION DU FICHIER DE SAUVEGARDE ---
+                    val openDocLauncher =
+                        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                            uri?.let {
+                                context.contentResolver.openInputStream(it)?.reader()?.use { reader ->
+                                    val imported: List<AACCell> = GsonInstance.gson.fromJson(
+                                        reader.readText(),
+                                        object : TypeToken<List<AACCell>>() {}.type
                                     )
+                                    boutons.clear(); boutons.addAll(imported)
                                 }
+                            }
+                        }
 
-                                // 3. BOUTON RETOUR (À DROITE)
-                                Box(modifier = Modifier.width(80.dp)) {
-                                    if (navigationStack.isNotEmpty()) {
-                                        IconButton(
-                                            onClick = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                navigationStack.removeAt(navigationStack.size - 1)
-                                            },
-                                            modifier = Modifier
-                                                .size(70.dp)
-                                                .background(Color.White, CircleShape)
-                                                .border(3.dp, Color(0xFF6200EE), CircleShape)
-                                        ) {
-                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color(0xFF6200EE), modifier = Modifier.size(35.dp))
+                    // Boucle d'Auto-Scroll à 100 FPS
+                    LaunchedEffect(dndState.isDragging) {
+                        while (dndState.isDragging) {
+                            val y = dndState.dragOffset.y
+                            if (gridRect.height > 0) {
+                                // Seuil Haut : 30% du haut de la grille
+                                val topThreshold = gridRect.top + (gridRect.height * 0.30f)
+                                // Seuil Bas : 50% (Milieu de la grille) pour rester loin du bas de l'écran
+                                val bottomThreshold = gridRect.top + (gridRect.height * 0.50f)
+
+                                if (y < topThreshold) {
+                                    val distance = (topThreshold - y).coerceAtLeast(0f)
+                                    val speed = (distance / (gridRect.height * 0.30f)) * 50f
+                                    gridState.scrollBy(-speed)
+                                } else if (y > bottomThreshold) {
+                                    // Scroll bas plus réactif car la zone est plus grande
+                                    val distance = (y - bottomThreshold).coerceAtLeast(0f)
+                                    val speed = (distance / (gridRect.height * 0.50f)) * 70f
+                                    gridState.scrollBy(speed)
+                                }
+                            }
+                            kotlinx.coroutines.delay(10)
+                        }
+                    }
+
+                    // --- LOGIQUE DE DROP ---
+                    val onDropRequest: (Offset, AACCell) -> Unit = { screenPos, droppedCell ->
+                        val target = dndState.currentTargetCell
+                        val mode = dndState.currentDropMode
+
+                        // 1. Est-ce qu'on lâche dans la barre de gauche ?
+                        if (sidebarRect.contains(screenPos)) {
+                            if (!coreWords.any { it.label == droppedCell.label }) {
+                                coreWords.add(droppedCell.copy(isQuickPhrase = false))
+                                saveCoreWords(coreWords)
+                            }
+                        } else if (target != null && target != droppedCell) {
+                            // 2. Logique d'Advanced Drop (Swap / Insert)
+                            val draggedIndex = currentButtons.indexOf(droppedCell)
+                            val targetIndex = currentButtons.indexOf(target)
+                            
+                            if (draggedIndex != -1 && targetIndex != -1) {
+                                when (mode) {
+                                    DropTargetMode.SWAP -> {
+                                        val temp = currentButtons[draggedIndex]
+                                        currentButtons[draggedIndex] = currentButtons[targetIndex]
+                                        currentButtons[targetIndex] = temp
+                                    }
+                                    DropTargetMode.INSERT_BEFORE, DropTargetMode.INSERT_AFTER -> {
+                                        currentButtons.removeAt(draggedIndex)
+                                        var newTargetIndex = currentButtons.indexOf(target)
+                                        if (mode == DropTargetMode.INSERT_AFTER) {
+                                            newTargetIndex += 1
                                         }
+                                        currentButtons.add(newTargetIndex, droppedCell)
+                                    }
+                                    else -> {}
+                                }
+                                saveButtons(boutons)
+                            }
+                        }
+                        
+                        // Nettoyage
+                        dndState.currentTargetCell = null
+                        dndState.currentDropMode = DropTargetMode.NONE
+                    }
+
+                    // Modificateur PERMANENT sur le Root
+                    val rootModifier = Modifier.pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) { // Écoute infinie
+                                // Lecture prioritaire sans bloquer les enfants (sauf si consume() est appelé)
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                
+                                // On agit UNIQUEMENT si un Drag a été initié par un appui long dans une cellule
+                                if (dndState.isDragging) {
+                                    val change = event.changes.firstOrNull()
+
+                                    if (change == null || !change.pressed) {
+                                        Log.d("Nina-Debug", "🏠 Root : Relâché détecté, exécution du Drop")
+                                        dndState.draggedCell?.let { onDropRequest(dndState.dragOffset, it) }
+                                        dndState.isDragging = false
+                                        dndState.draggedCell = null
+                                    } else {
+                                        // Le doigt bouge ! On met à jour la position
+                                        dndState.dragOffset = change.position
+
+                                        // NOUVEAU : Calcul visuel en temps réel
+                                        val localOffset = dndState.dragOffset - gridRect.topLeft
+                                        var hoveredCell: AACCell? = null
+                                        var hoveredRect: Rect? = null
+                                        
+                                        for ((gridCell, bounds) in gridCellsBounds) {
+                                            val localBounds = bounds.translate(-gridRect.topLeft)
+                                            if (localBounds.contains(localOffset)) {
+                                                hoveredCell = gridCell
+                                                hoveredRect = localBounds
+                                                break
+                                            }
+                                        }
+
+                                        if (hoveredCell != null && hoveredCell != dndState.draggedCell) {
+                                            dndState.currentTargetCell = hoveredCell
+                                            val cellWidth = hoveredRect!!.width
+                                            val relativeX = localOffset.x - hoveredRect.left
+                                            
+                                            dndState.currentDropMode = when {
+                                                relativeX < cellWidth * 0.25f -> DropTargetMode.INSERT_BEFORE
+                                                relativeX > cellWidth * 0.75f -> DropTargetMode.INSERT_AFTER
+                                                else -> DropTargetMode.SWAP
+                                            }
+                                        } else {
+                                            dndState.currentTargetCell = null
+                                            dndState.currentDropMode = DropTargetMode.NONE
+                                        }
+
+                                        // Crucial : On consomme l'événement pour empêcher la grille de scroller
+                                        change.consume() 
                                     }
                                 }
                             }
+                        }
+                    }
 
-                            // GRILLE
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                AnimatedContent(
-                                    targetState = currentButtons,
-                                    transitionSpec = {
-                                        if (navigationStack.size >= stackSize) {
-                                            (slideInHorizontally { it } + fadeIn()).togetherWith(slideOutHorizontally { -it } + fadeOut())
-                                        } else {
-                                            (slideInHorizontally { -it } + fadeIn()).togetherWith(slideOutHorizontally { it } + fadeOut())
-                                        }.using(SizeTransform(clip = false))
-                                    },
-                                    label = ""
-                                ) { targetButtons ->
-                                    LazyVerticalGrid(
-                                        columns = GridCells.Fixed(columnCount),
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentPadding = PaddingValues(16.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .offset(x = -offsetX.dp, y = -offsetY.dp)
+                            .then(rootModifier),
+                        color = if (isCviMode) Color.Black else Color(backgroundColor)
+                    ) {
+                        Row(modifier = Modifier.fillMaxSize()) {
+
+                            // 1. COLONNE PRINCIPALE (Barre supérieure + Grille)
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            ) {
+                                // --- BARRE SUPÉRIEURE (Phrase et Contrôles) ---
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Bouton Play : Prononce la phrase construite
+                                    IconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            if (phrase.isNotEmpty()) {
+                                                val texteBrut = phrase.joinToString(" ") { it.label }
+                                                val texteFinal = LocalGrammarEngine.refine(texteBrut)
+                                                speakText(texteFinal, voicePitch, voiceRate)
+                                            }
+                                        },
+                                        enabled = phrase.isNotEmpty(),
+                                        modifier = Modifier
+                                            .size(90.dp)
+                                            .background(
+                                                if (phrase.isNotEmpty()) Color(0xFF4CAF50) else Color(0xFFE0E0E0), 
+                                                CircleShape
+                                            )
+                                            .border(4.dp, Color.White, CircleShape)
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(60.dp))
+                                    }
+
+                                    Box(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            IconButton(onClick = { showWordFinder = true }, modifier = Modifier.padding(end = 8.dp)) {
+                                                Icon(Icons.Default.Search, contentDescription = "Chercher un mot", tint = Color(0xFF6200EE))
+                                            }
+                                            IconButton(onClick = { showKeyboardDialog = true }, modifier = Modifier.padding(end = 8.dp)) {
+                                                Icon(Icons.Default.Keyboard, contentDescription = "Saisie libre", tint = Color(0xFF6200EE))
+                                            }
+                                            SentenceBar(sentence = phrase, onClear = { phrase.clear() }, haptic = haptic)
+                                        }
+                                    }
+
+                                    // Bouton Retour : Navigation dans les dossiers
+                                    Box(modifier = Modifier.width(80.dp)) {
+                                        if (navigationStack.isNotEmpty()) {
+                                            IconButton(
+                                                onClick = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    navigationStack.removeAt(navigationStack.size - 1)
+                                                },
+                                                modifier = Modifier
+                                                    .size(70.dp)
+                                                    .background(Color.White, CircleShape)
+                                                    .border(3.dp, Color(0xFF6200EE), CircleShape)
+                                            ) {
+                                                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color(0xFF6200EE), modifier = Modifier.size(35.dp))
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // --- ZONE DE CONTENU PRINCIPALE ---
+                                Row(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                                    
+                                    // A. SIDEBAR GAUCHE (Core Words / Raccourcis)
+                                    Column(
+                                        modifier = Modifier
+                                            .width(120.dp)
+                                            .fillMaxHeight()
+                                            .onGloballyPositioned { sidebarRect = it.boundsInRoot() }
+                                            .background(Color(0xFFF5F5F5), RoundedCornerShape(16.dp))
+                                            .verticalScroll(rememberScrollState())
+                                            .padding(bottom = 16.dp),
                                         verticalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
-                                        items(targetButtons) { cell ->
-                                            AACCellButton(
-                                                cell = cell,
-                                                haptic = haptic,
+                                        coreWords.forEach { cell ->
+                                            AACCellView(
+                                                cell = cell, haptic = haptic, debounceTime = debounceTime,
+                                                isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode,
                                                 onClick = {
-                                                    // --- LOGIQUE AUDIO ---
-                                                    if (!cell.audioPath.isNullOrEmpty()) {
-                                                        // On joue le son enregistré (Ta voix)
-                                                        try {
-                                                            val mp = android.media.MediaPlayer().apply {
-                                                                setDataSource(cell.audioPath)
-                                                                prepare()
-                                                                start()
-                                                                setOnCompletionListener { release() }
-                                                            }
-                                                        } catch (e: Exception) {
-                                                            // Si le fichier audio a un souci, on bascule sur la voix robot par sécurité
-                                                            speakText(cell.label)
-                                                        }
-                                                    } else {
-                                                        // Pas de son enregistré ? On utilise le TTS classique
-                                                        speakText(cell.label)
-                                                    }
-
-                                                    // --- LOGIQUE NAVIGATION / PHRASE ---
-                                                    if (cell.isFolder) {
-                                                        navigationStack.add(cell)
-                                                    } else {
-                                                        phrase.add(cell)
-                                                    }
-                                                },
-                                                onLongClick = {
-                                                    if (isAdminMode) {
+                                                    if (isEditMode) {
                                                         cellToEdit = cell
                                                         showEditDialog = true
+                                                    } else {
+                                                        speakText(cell.label, voicePitch, voiceRate)
+                                                        trackWordUsage(cell, context, { usageStats = it })
+                                                        if (!cell.isQuickPhrase) phrase.add(cell)
                                                     }
-                                                }
+                                                },
+                                                onLongClick = { if (isAdminMode && !isEditMode) { cellToEdit = cell; showEditDialog = true } }
                                             )
                                         }
+
+                                        if (isAdminMode) {
+                                            IconButton(
+                                                onClick = { isAddingToCore = true; showAddDialog = true },
+                                                modifier = Modifier.fillMaxWidth().aspectRatio(1f).background(Color.White.copy(alpha = 0.5f), RoundedCornerShape(24.dp)).border(2.dp, Color.Gray, RoundedCornerShape(24.dp))
+                                            ) { Icon(Icons.Default.Add, contentDescription = null, tint = Color.Gray) }
+                                        }
+                                    }
+
+                                    // Séparateur
+                                    Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp, vertical = 8.dp).width(2.dp).background(Color.LightGray.copy(alpha = 0.5f)))
+
+                                    // B. GRILLE CENTRALE (Dossiers et Vocabulaire)
+                                    Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                        AnimatedContent(
+                                            targetState = currentButtons,
+                                            transitionSpec = {
+                                                (slideInHorizontally { it } + fadeIn()).togetherWith(slideOutHorizontally { -it } + fadeOut())
+                                            },
+                                            label = "GridAnimation"
+                                        ) { targetButtons ->
+                                            LazyVerticalGrid(
+                                                columns = GridCells.Fixed(columnCount),
+                                                state = gridState,
+                                                contentPadding = PaddingValues(bottom = 500.dp),
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .onGloballyPositioned { gridRect = it.boundsInRoot() },
+                                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                                            ) {
+                                                items(
+                                                    items = targetButtons,
+                                                    key = { cell -> cell.label } // Clé ultra-stable
+                                                ) { cell ->
+                                                    var posInRoot by remember { mutableStateOf(Offset.Zero) }
+                                                    DraggableCellWrapper(
+                                                        cell = cell
+                                                    ) {
+                                                        Box(modifier = Modifier.onGloballyPositioned { 
+                                                            posInRoot = it.positionInRoot()
+                                                            gridCellsBounds[cell] = it.boundsInRoot()
+                                                        }) {
+                                                            AACCellView(
+                                                                cell = cell, haptic = haptic, debounceTime = debounceTime,
+                                                                isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode,
+                                                                onClick = {
+                                                                    Log.d("Nina-Debug", "🖱️ Clic Cellule détecté")
+                                                                    if (isEditMode) {
+                                                                        cellToEdit = cell
+                                                                        showEditDialog = true
+                                                                    } else {
+                                                                        playCellAudio(cell, voicePitch, voiceRate)
+                                                                        trackWordUsage(cell, context, { usageStats = it })
+                                                                        if (cell.isFolder) navigationStack.add(cell)
+                                                                        else if (!cell.isQuickPhrase) phrase.add(cell)
+                                                                    }
+                                                                },
+                                                                onLongClick = {
+                                                                    if (isAdminMode && !isEditMode) {
+                                                                        dndState.draggedCell = cell
+                                                                        dndState.dragOffset = posInRoot
+                                                                        dndState.isDragging = true
+                                                                        Log.d("Nina-Debug", "🚀 Drag démarré pour ${cell.label} à $posInRoot")
+                                                                    }
+                                                                }
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        // BARRE ADMIN
-                        Column(
-                            modifier = Modifier.width(100.dp).fillMaxHeight().padding(vertical = 16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(24.dp)
-                        ) {
-                            FloatingActionButton(
-                                onClick = { isAdminMode = !isAdminMode; if(!isAdminMode) showMenu = false },
-                                shape = CircleShape,
-                                containerColor = if (isAdminMode) Color(0xFFFFEB3B) else Color(0xFF4CAF50)
-                            ) { Icon(if (isAdminMode) Icons.Default.LockOpen else Icons.Default.Lock, null) }
+                    // --- SIDEBAR DROITE (Menu Admin et Phrases Rapides) ---
+                    Column(
+                        modifier = Modifier.width(110.dp).fillMaxHeight().padding(vertical = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                                // Bouton de verrouillage Admin
+                                FloatingActionButton(
+                                    onClick = {
+                                        if (isAdminMode) {
+                                            isAdminMode = false
+                                            isEditMode = false // On coupe l'édition d'urgence au verrouillage
+                                            android.util.Log.d("Nina-Debug", "🔒 Cadenas fermé -> Mode Édition forcé à FALSE")
+                                        } else {
+                                            showAdminChallengeDialog = true
+                                        }
+                                    },
+                                    shape = CircleShape,
+                                    containerColor = if (isAdminMode) Color(0xFFFFEB3B) else Color(0xFF4CAF50)
+                                ) { Icon(if (isAdminMode) Icons.Default.LockOpen else Icons.Default.Lock, null) }
 
-                            if (isAdminMode) {
-                                Box {
-                                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(60.dp).background(Color.White, CircleShape).border(1.dp, Color.Gray, CircleShape))
-                                    { Icon(Icons.Default.MoreVert, null) }
-
-                                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                        DropdownMenuItem(text = { Text("➕ Ajouter") }, onClick = { showMenu = false; showAddDialog = true })
-                                        HorizontalDivider()
-                                        DropdownMenuItem(text = { Text("💾 Sauvegarder") }, onClick = { showMenu = false; createDocLauncher.launch("nina_aac.json") })
-                                        DropdownMenuItem(text = { Text("📂 Restaurer") }, onClick = { showMenu = false; openDocLauncher.launch(arrayOf("application/json")) })
-                                    }
+                                if (isAdminMode) {
+                                    AdminMenu(
+                                        showMenu = showMenu,
+                                        onMenuToggle = { showMenu = it },
+                                        onSettings = { showSettingsDialog = true },
+                                        onHelp = { showHelpDialog = true },
+                                        onCalibration = { showCalibration = true },
+                                        onStats = { showStatsDialog = true },
+                                        onAdd = { showAddDialog = true },
+                                        onKioskToggle = { 
+                                            activity?.let { act ->
+                                                if (isKioskMode) { act.stopLockTask(); isKioskMode = false }
+                                                else { act.startLockTask(); isKioskMode = true }
+                                            }
+                                        },
+                                        isKioskMode = isKioskMode,
+                                        isEditMode = isEditMode,
+                                        onEditModeToggle = { isEditMode = it },
+                                        onBackup = { shareBackupFile(context, boutons) },
+                                        onRestore = { openDocLauncher.launch(arrayOf("application/json")) }
+                                    )
+                                    // Contrôleur de taille de grille
+                                    GridSizeSelector(columnCount, { columnCount = it })
                                 }
-                                Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
-                                        IconButton(onClick = { if (columnCount < 8) columnCount++ }) { Icon(Icons.Default.KeyboardArrowUp, null) }
-                                        Text("$columnCount", fontWeight = FontWeight.Black)
-                                        IconButton(onClick = { if (columnCount > 1) columnCount-- }) { Icon(Icons.Default.KeyboardArrowDown, null) }
+
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                                // Zone Quick Fires (Phrases rapides)
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    quickFires.forEach { cell ->
+                                        AACCellView(
+                                            cell = cell, haptic = haptic, debounceTime = debounceTime,
+                                            isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode,
+                                            onClick = {
+                                                if (isEditMode) {
+                                                    cellToEdit = cell
+                                                    showEditDialog = true
+                                                } else {
+                                                    speakText(cell.label, voicePitch, voiceRate)
+                                                    trackWordUsage(cell, context, { usageStats = it })
+                                                }
+                                            },
+                                            onLongClick = { if (isAdminMode && !isEditMode) { cellToEdit = cell; showEditDialog = true } }
+                                        )
+                                    }
+
+                                    if (isAdminMode) {
+                                        IconButton(
+                                            onClick = { isAddingToQuickFires = true; showAddDialog = true },
+                                            modifier = Modifier.fillMaxWidth().aspectRatio(1f).background(Color.White.copy(alpha = 0.5f), RoundedCornerShape(24.dp)).border(2.dp, Color.Gray, RoundedCornerShape(24.dp))
+                                        ) { Icon(Icons.Default.Add, contentDescription = null, tint = Color.Gray) }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                if (showAddDialog) {
-                    AddButtonDialog(onDismiss = { showAddDialog = false }, onConfirm = { nouveau ->
-                        currentButtons.add(nouveau); saveButtons(boutons); showAddDialog = false
-                    })
-                }
-
-                if (showEditDialog && cellToEdit != null) {
-                    EditDialog(
-                        cell = cellToEdit!!,
-                        allButtons = boutons, // Liste racine pour trouver les dossiers
-                        onDelete = {
-                            currentButtons.remove(cellToEdit)
-                            saveButtons(boutons)
+                    // --- GESTION DES BOITES DE DIALOGUE (Overlay) ---
+                    DialogManager(
+                        showKeyboardDialog = showKeyboardDialog, onKeyboardDismiss = { showKeyboardDialog = false }, onKeyboardValidate = { phrase.add(it); showKeyboardDialog = false },
+                        showAdminChallenge = showAdminChallengeDialog, onAdminSuccess = { isAdminMode = true; showAdminChallengeDialog = false }, onAdminDismiss = { showAdminChallengeDialog = false },
+                        showAddDialog = showAddDialog, onAddDismiss = { showAddDialog = false; isAddingToCore = false; isAddingToQuickFires = false },
+                        onAddConfirm = { nouveau ->
+                            if (isAddingToCore) { coreWords.add(nouveau); saveCoreWords(coreWords) }
+                            else if (isAddingToQuickFires) { quickFires.add(nouveau.copy(isQuickPhrase = true)); saveQuickFires(quickFires) }
+                            else { currentButtons.add(nouveau); saveButtons(boutons) }
+                            showAddDialog = false; isAddingToCore = false; isAddingToQuickFires = false
+                        },
+                        showSettings = showSettingsDialog, onSettingsDismiss = { showSettingsDialog = false },
+                        onSettingsSave = { newColor, newPitch, newRate, newDebounce, newCviMode ->
+                            backgroundColor = newColor; voicePitch = newPitch; voiceRate = newRate; debounceTime = newDebounce; isCviMode = newCviMode
+                            context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit()
+                                .putLong("bg_color", newColor).putFloat("voice_pitch", newPitch).putFloat("voice_rate", newRate)
+                                .putLong("debounce_time", newDebounce).putBoolean("cvi_mode", newCviMode).apply()
+                        },
+                        showHelp = showHelpDialog, onHelpDismiss = { showHelpDialog = false },
+                        showCalibration = showCalibration, onCalibrationFinished = { x, y ->
+                            offsetX = x; offsetY = y
+                            context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit().putFloat("offset_x", x).putFloat("offset_y", y).apply()
+                            showCalibration = false
+                        },
+                        showWordFinder = showWordFinder, onWordFinderDismiss = { showWordFinder = false },
+                        showStats = showStatsDialog, onStatsDismiss = { showStatsDialog = false }, onStatsReset = { usageStats = emptyMap(); saveStats(context, emptyMap()) },
+                        showEditDialog = showEditDialog, cellToEdit = cellToEdit, allButtons = boutons,
+                        currentButtons = currentButtons, coreWords = coreWords, quickFires = quickFires,
+                        onEditDelete = { targetCell ->
+                            if (coreWords.contains(targetCell)) { coreWords.remove(targetCell); saveCoreWords(coreWords) }
+                            else if (quickFires.contains(targetCell)) { quickFires.remove(targetCell); saveQuickFires(quickFires) }
+                            else { currentButtons.remove(targetCell); saveButtons(boutons) }
                             showEditDialog = false
                         },
-                        onRename = { new ->
-                            val idx = currentButtons.indexOf(cellToEdit)
-                            if (idx != -1) {
-                                currentButtons[idx] = currentButtons[idx].copy(label = new)
+                        onEditSave = { targetCell, newName, newColor, newUrl, newAudio, isFld, isQuick, isHid ->
+                            scope.launch(Dispatchers.IO) {
+                                val finalUrl = if (newUrl?.startsWith("http") == true) saveImageLocally(context, newUrl, "${newName.trim()}_${System.currentTimeMillis()}") else newUrl
+                                withContext(Dispatchers.Main) {
+                                    updateCellInList(targetCell, coreWords, currentButtons, quickFires, name = newName, url = finalUrl, audio = newAudio, color = newColor, isQuick = isQuick, isHidden = isHid)
+                                    saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
+                                    showEditDialog = false
+                                }
+                            }
+                        },
+                        onEditMoveToFolder = { sourceCell, targetFolder ->
+                            if (sourceCell != null) {
+                                currentButtons.remove(sourceCell)
+                                if (targetFolder != null) {
+                                    targetFolder.content.add(sourceCell)
+                                } else {
+                                    boutons.add(sourceCell)
+                                }
                                 saveButtons(boutons)
                             }
                             showEditDialog = false
                         },
-                        onMoveInList = { dir ->
-                            val idx = currentButtons.indexOf(cellToEdit)
-                            val nIdx = idx + dir
-                            if (nIdx in 0 until currentButtons.size) {
-                                val item = currentButtons.removeAt(idx)
-                                currentButtons.add(nIdx, item)
-                                saveButtons(boutons)
-                            }
-                        },
-                        onMoveToFolder = { targetFolder ->
-                            // 1. On retire de l'endroit actuel
-                            currentButtons.remove(cellToEdit)
-                            // 2. On ajoute dans le contenu du dossier cible
-                            targetFolder.content.add(cellToEdit!!)
-                            // 3. On sauvegarde
-                            saveButtons(boutons)
-                            showEditDialog = false
-                        },
-                        onDismiss = { showEditDialog = false }
+                        onEditDismiss = { showEditDialog = false }
                     )
                 }
             }
         }
     }
 
-    override fun onInit(status: Int) { if (status == TextToSpeech.SUCCESS) { tts?.language = Locale.FRENCH; tts?.setSpeechRate(0.85f) } }
-    private fun speakText(text: String) { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null) }
-    private fun speakFullSentence(sentence: List<AACCell>) {
-        if (sentence.isNotEmpty()) tts?.speak(sentence.joinToString(" ") { it.label }, TextToSpeech.QUEUE_FLUSH, null, null)
+    // --- FONCTIONS UTILITAIRES ---
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.setLanguage(Locale.FRENCH)
+        }
     }
+
+    private fun speakText(text: String, pitch: Float = 1.0f, rate: Float = 1.0f) {
+        if (text.isBlank()) return
+        val cleanText = text.replace(Regex("[^\\p{L}\\p{Nd}\\s.,!?'-]"), "").trim()
+        if (cleanText.isBlank()) return
+        tts?.setPitch(pitch.coerceIn(0.5f, 2.0f))
+        tts?.setSpeechRate(rate.coerceIn(0.5f, 2.0f))
+        tts?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+    }
+
+    private fun playCellAudio(cell: AACCell, pitch: Float, rate: Float) {
+        val hasValidAudio = !cell.audioPath.isNullOrEmpty() && File(cell.audioPath).exists()
+        if (hasValidAudio) {
+            try {
+                android.media.MediaPlayer().apply {
+                    setDataSource(cell.audioPath)
+                    prepare(); start()
+                    setOnCompletionListener { release() }
+                }
+            } catch (e: Exception) {
+                speakText(cell.label, pitch, rate)
+            }
+        } else {
+            speakText(cell.label, pitch, rate)
+        }
+    }
+
+    private fun trackWordUsage(cell: AACCell, context: Context, onUpdate: (Map<String, Int>) -> Unit) {
+        if (!cell.isFolder) {
+            val stats = loadStats(context).toMutableMap()
+            stats[cell.label] = (stats[cell.label] ?: 0) + 1
+            saveStats(context, stats)
+            onUpdate(stats)
+        }
+    }
+
     private fun saveButtons(list: List<AACCell>) {
-        val json = Gson().toJson(list)
-        getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit().putString("saved_buttons", json).apply()
+        getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit()
+            .putString("saved_buttons", GsonInstance.gson.toJson(list)).apply()
     }
+
     private fun loadButtons(): List<AACCell> {
         val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString("saved_buttons", null)
-        return if (json != null) try { Gson().fromJson(json, object : TypeToken<List<AACCell>>() {}.type) } catch (e: Exception) { emptyList() }
-        else listOf(AACCell("Manger", 0xFFC8E6C9L, "https://static.arasaac.org/pictograms/2544/2544_300.png"))
+        return if (json != null) {
+            try { GsonInstance.gson.fromJson(json, object : TypeToken<List<AACCell>>() {}.type) } catch (e: Exception) { getStarterPack() }
+        } else getStarterPack()
     }
-    override fun onDestroy() { tts?.shutdown(); super.onDestroy() }
-}
 
-@Composable
+    private fun saveCoreWords(list: List<AACCell>) {
+        getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit()
+            .putString("saved_core_words", GsonInstance.gson.toJson(list)).apply()
+    }
 
-fun SentenceBar(sentence: SnapshotStateList<AACCell>, onClear: () -> Unit, haptic: androidx.compose.ui.hapticfeedback.HapticFeedback) {
-    Card(
-        modifier = Modifier.fillMaxWidth().height(100.dp),
-        shape = RoundedCornerShape(50.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(8.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.weight(1f)) {
-                if (sentence.isEmpty()) {
-                    Text("Nina veut dire...", color = Color.LightGray, fontSize = 20.sp)
-                } else {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Utilisation de itemsIndexed pour identifier la position exacte
-                        itemsIndexed(sentence) { index, cell ->
-                            AsyncImage(
-                                model = cell.imageUrl,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(75.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .border(1.dp, Color.LightGray, RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        // On vérifie que l'index est toujours valide avant de supprimer
-                                        if (index < sentence.size) {
-                                            sentence.removeAt(index)
-                                        }
-                                    }
-                            )
-                        }
-                    }
-                }
+    private fun loadCoreWords(): List<AACCell> {
+        val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString("saved_core_words", null)
+        return if (json != null) {
+            try { GsonInstance.gson.fromJson(json, object : TypeToken<List<AACCell>>() {}.type) } catch (e: Exception) { getDefaultCoreWords() }
+        } else getDefaultCoreWords()
+    }
+
+    private fun saveQuickFires(list: List<AACCell>) {
+        getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit()
+            .putString("saved_quick_fires", GsonInstance.gson.toJson(list)).apply()
+    }
+
+    private fun loadQuickFires(): List<AACCell> {
+        val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString("saved_quick_fires", null)
+        return if (json != null) {
+            try { GsonInstance.gson.fromJson(json, object : TypeToken<List<AACCell>>() {}.type) } catch (e: Exception) { getDefaultQuickFires() }
+        } else getDefaultQuickFires()
+    }
+
+    private fun shareBackupFile(context: Context, boutons: List<AACCell>) {
+        try {
+            val file = File(context.cacheDir, "sauvegarde_nina.json")
+            file.writeText(GsonInstance.gson.toJson(boutons))
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "application/json"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-
-            // Bouton pour tout effacer (Corbeille)
-            if (sentence.isNotEmpty()) {
-                IconButton(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onClear()
-                    },
-                    modifier = Modifier
-                        .size(55.dp)
-                        .background(Color(0xFFFFEBEE), CircleShape)
-                ) {
-                    Icon(Icons.Default.Delete, null, tint = Color.Red)
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun AACCellButton(cell: AACCell, haptic: androidx.compose.ui.hapticfeedback.HapticFeedback, onClick: () -> Unit, onLongClick: () -> Unit) {
-    var isPressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (isPressed) 0.94f else 1f)
-    val folderShape = remember { FolderTabShape() }
-
-    Box(modifier = Modifier.aspectRatio(1f).padding(if (cell.isFolder) 2.dp else 0.dp)) {
-        Card(
-            modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale)
-                .combinedClickable(
-                    onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onClick() },
-                    onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLongClick() }
-                ),
-            shape = if (cell.isFolder) folderShape else RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(cell.colorLong)),
-            elevation = CardDefaults.cardElevation(if (cell.isFolder) 6.dp else 2.dp),
-            border = if (cell.isFolder) BorderStroke(2.dp, Color(0xFFC4A77D).copy(alpha = 0.6f)) else null
-        ) {
-            Column(modifier = Modifier.fillMaxSize().padding(8.dp).padding(top = if(cell.isFolder) 12.dp else 0.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = 0.7f)).padding(4.dp)) {
-                    if (!cell.imageUrl.isNullOrEmpty()) AsyncImage(cell.imageUrl, null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-                    else if (cell.isFolder) Text("📂", fontSize = 40.sp, modifier = Modifier.align(Alignment.Center))
-                }
-                Text(cell.label.uppercase(), fontWeight = FontWeight.Black, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
-            }
-        }
-    }
-}
-
-class FolderTabShape(val tabWidthDp: Dp = 60.dp, val tabHeightDp: Dp = 12.dp, val cornerRadiusDp: Dp = 8.dp) : Shape {
-    override fun createOutline(size: Size, layoutDirection: androidx.compose.ui.unit.LayoutDirection, density: androidx.compose.ui.unit.Density): Outline {
-        val tw = with(density) { tabWidthDp.toPx() }; val th = with(density) { tabHeightDp.toPx() }; val cr = with(density) { cornerRadiusDp.toPx() }
-        val path = Path().apply {
-            moveTo(0f, th + cr); quadraticTo(0f, th, cr, th)
-            lineTo(size.width/2f - tw/2f - cr, th); quadraticTo(size.width/2f - tw/2f, th, size.width/2f - tw/2f, th/2f); quadraticTo(size.width/2f - tw/2f, 0f, size.width/2f - tw/2f + cr, 0f)
-            lineTo(size.width/2f + tw/2f - cr, 0f); quadraticTo(size.width/2f + tw/2f, 0f, size.width/2f + tw/2f, th/2f); quadraticTo(size.width/2f + tw/2f, th, size.width/2f + tw/2f + cr, th)
-            lineTo(size.width - cr, th); quadraticTo(size.width, th, size.width, th + cr)
-            lineTo(size.width, size.height - cr); quadraticTo(size.width, size.height, size.width - cr, size.height)
-            lineTo(cr, size.height); quadraticTo(0f, size.height, 0f, size.height - cr); close()
-        }
-        return Outline.Generic(path)
-    }
-}
-
-@Composable
-fun AddButtonDialog(onDismiss: () -> Unit, onConfirm: (AACCell) -> Unit) {
-    val context = LocalContext.current
-    var label by remember { mutableStateOf("") }
-    var isFolder by remember { mutableStateOf(false) }
-    var selectedUrl by remember { mutableStateOf<String?>(null) }
-    var selectedColor by remember { mutableLongStateOf(0xFFFFFFFFL) }
-    var isLoading by remember { mutableStateOf(false) }
-    var isSaving by remember { mutableStateOf(false) }
-
-    // États pour l'audio
-    var audioPath by remember { mutableStateOf<String?>(null) }
-    var isRecording by remember { mutableStateOf(false) }
-    val recorder = remember { AudioRecorder(context) }
-
-    val scope = rememberCoroutineScope()
-    val searchResults = remember { mutableStateListOf<OpenSymbolResponse>() }
-
-    val photoLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { selectedUrl = it.toString() }
+            context.startActivity(android.content.Intent.createChooser(intent, "Sauvegarder la grille de Nina via :"))
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
-    val categories = listOf(
-        "Sujet" to 0xFFFFF9C4L,
-        "Action" to 0xFFC8E6C9L,
-        "Objet" to 0xFFBBDEFBL,
-        "Émotion" to 0xFFF8BBD0L,
-        "Lieu" to 0xFFE1BEE7L,
-        "Autre" to 0xFFFFFFFFL
+    override fun onDestroy() {
+        tts?.shutdown(); super.onDestroy()
+    }
+
+    // --- PACK DE DÉMARRAGE ET PAR DÉFAUT ---
+
+    private fun getDefaultCoreWords() = listOf(
+        AACCell("Vouloir", 0xFFC8E6C9L, "FETCH"),
+        AACCell("Aider", 0xFFC8E6C9L, "FETCH"),
+        AACCell("Encore", 0xFFF8BBD0L, "FETCH"),
+        AACCell("Fini", 0xFFF8BBD0L, "FETCH"),
+        AACCell("Toilettes", 0xFFE1BEE7L, "FETCH")
     )
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(28.dp),
-        containerColor = Color(0xFFF0F0F5),
-        confirmButton = {},
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text("Nouveau Bouton", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-
-                // 1. CHAMP DE SAISIE AVEC RECHERCHE ET PHOTO
-                OutlinedTextField(
-                    value = label,
-                    onValueChange = { label = it },
-                    placeholder = { Text("Nom du bouton") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    trailingIcon = {
-                        Row(modifier = Modifier.padding(end = 8.dp)) {
-                            IconButton(onClick = { photoLauncher.launch("image/*") }) {
-                                Icon(Icons.Default.AddAPhoto, contentDescription = "Photo", tint = Color(0xFF4A5D91))
-                            }
-                            IconButton(onClick = {
-                                if (label.isBlank()) return@IconButton
-                                scope.launch {
-                                    isLoading = true
-                                    searchResults.clear()
-                                    try {
-                                        val araResults = RetrofitInstance.arasaacApi.searchPictograms(label.trim().lowercase())
-                                        araResults.forEach {
-                                            searchResults.add(OpenSymbolResponse(
-                                                name = "ARASAAC",
-                                                imageUrl = "https://static.arasaac.org/pictograms/${it._id}/${it._id}_300.png"
-                                            ))
-                                        }
-                                    } catch (e: Exception) { println("Erreur : ${e.message}") }
-                                    finally { isLoading = false }
-                                }
-                            }) {
-                                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                                else Icon(Icons.Default.Search, contentDescription = "Chercher", tint = Color(0xFF4A5D91))
-                            }
-                        }
-                    }
-                )
-
-                // 2. RÉSULTATS DE RECHERCHE ARASAAC
-                if (searchResults.isNotEmpty()) {
-                    Text("Résultats ARASAAC :", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(searchResults) { res ->
-                            AsyncImage(
-                                model = res.imageUrl,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(85.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .border(
-                                        if (selectedUrl == res.imageUrl) 4.dp else 1.dp,
-                                        if (selectedUrl == res.imageUrl) Color(0xFF4A5D91) else Color.Gray,
-                                        RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable { selectedUrl = res.imageUrl }
-                            )
-                        }
-                    }
-                }
-
-                // 3. SECTION CATÉGORIES (COULEURS)
-                Text("Catégorie :", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    categories.forEach { (name, color) ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(
-                                modifier = Modifier
-                                    .size(45.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(color))
-                                    .border(if (selectedColor == color) 2.dp else 1.dp, Color.Black, CircleShape)
-                                    .clickable { selectedColor = color }
-                            )
-                            Text(name, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
-                        }
-                    }
-                }
-
-                // 4. OPTION DOSSIER
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = isFolder, onCheckedChange = { isFolder = it })
-                    Text("Dossier 📂", fontSize = 16.sp)
-                }
-
-                // 5. ENREGISTREMENT VOCAL (NOUVEAU)
-                Text("Voix personnalisée (restez appuyé) :", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // ON UTILISE BOX AU LIEU DE ICONBUTTON
-                    Box(
-                        modifier = Modifier
-                            .size(80.dp)
-                            .clip(CircleShape)
-                            .background(if (isRecording) Color.Red else Color.Gray)
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onPress = {
-                                        try {
-                                            val audioName = "audio_${System.currentTimeMillis()}"
-                                            // On lance l'enregistrement
-                                            audioPath = recorder.startRecording(audioName)
-                                            isRecording = true
-
-                                            awaitRelease() // Attend que le doigt se lève
-                                        } finally {
-                                            // S'exécute quand on lève le doigt
-                                            recorder.stopRecording()
-                                            isRecording = false
-                                        }
-                                    }
-                                )
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(40.dp)
-                        )
-                    }
-
-                    Column {
-                        Text(if (isRecording) "Enregistrement..." else "Maintenir pour enregistrer")
-                        if (audioPath != null && !isRecording) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("🎙️ Prêt !", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
-                                TextButton(onClick = { audioPath = null }) {
-                                    Text("Effacer", color = Color.Red, fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 6. APERÇU FINAL
-                if (selectedUrl != null) {
-                    AsyncImage(
-                        model = selectedUrl,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(100.dp)
-                            .align(Alignment.CenterHorizontally)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(selectedColor).copy(alpha = 0.3f))
-                            .padding(8.dp)
-                    )
-                }
-
-                // 7. BOUTONS ACTIONS
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Annuler", fontSize = 18.sp, color = Color(0xFF4A5D91))
-                    }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Button(
-                        onClick = {
-                            isSaving = true
-                            scope.launch(Dispatchers.IO) {
-                                val finalUrl = if (selectedUrl?.startsWith("http") == true) {
-                                    saveImageLocally(context, selectedUrl!!, "${label.trim()}_${System.currentTimeMillis()}")
-                                } else {
-                                    selectedUrl
-                                }
-                                withContext(Dispatchers.Main) {
-                                    isSaving = false
-                                    // ON AJOUTE audioPath ICI (le 4ème paramètre de AACCell)
-                                    onConfirm(AACCell(label, selectedColor, finalUrl, audioPath, isFolder))
-                                }
-                            }
-                        },
-                        enabled = label.isNotEmpty() && selectedUrl != null && !isSaving,
-                        shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD1D5E3))
-                    ) {
-                        if (isSaving) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
-                        else Text("Créer", fontSize = 18.sp, color = Color(0xFF4A5D91))
-                    }
-                }
-            }
-        }
+    private fun getDefaultQuickFires() = listOf(
+        AACCell("Bonjour", 0xFFFFF9C4L, "FETCH", isQuickPhrase = true),
+        AACCell("Oui", 0xFFC8E6C9L, "FETCH", isQuickPhrase = true),
+        AACCell("Non", 0xFFFFCDD2L, "FETCH", isQuickPhrase = true),
+        AACCell("Merci", 0xFFBBDEFBL, "FETCH", isQuickPhrase = true)
     )
+
+    private fun getStarterPack(): List<AACCell> {
+        val colPersonne = 0xFFFFF9C4L; val colAction = 0xFFC8E6C9L; val colObjet = 0xFFFFCC80L
+        val colDesc = 0xFFBBDEFBL; val colSocial = 0xFFF8BBD0L; val colLieu = 0xFFE1BEE7L
+
+        return listOf(
+            AACCell("Moi", colPersonne, "FETCH"), AACCell("Toi", colPersonne, "FETCH"),
+            AACCell("Vouloir", colAction, "FETCH"), AACCell("Aller", colAction, "FETCH"),
+            AACCell("Encore", colSocial, "FETCH"), AACCell("Fini", colSocial, "FETCH"),
+            AACCell("Aider", colAction, "FETCH"), AACCell("Avec", colSocial, "FETCH"),
+            AACCell("Oui", colSocial, "FETCH"), AACCell("Non", colSocial, "FETCH"),
+            AACCell("Actions", colAction, "FETCH", isFolder = true, content = mutableStateListOf(AACCell("Manger", colAction, "FETCH"), AACCell("Boire", colAction, "FETCH"))),
+            AACCell("Nourriture", colObjet, "FETCH", isFolder = true, content = mutableStateListOf(AACCell("Eau", colObjet, "FETCH"), AACCell("Gâteau", colObjet, "FETCH"))),
+            AACCell("Personnes", colPersonne, "FETCH", isFolder = true, content = mutableStateListOf(AACCell("Maman", colPersonne, "FETCH"), AACCell("Papa", colPersonne, "FETCH"))),
+            AACCell("Émotions", colDesc, "FETCH", isFolder = true, content = mutableStateListOf(AACCell("Content", colDesc, "FETCH"), AACCell("Triste", colDesc, "FETCH"))),
+            AACCell("Lieux", colLieu, "FETCH", isFolder = true, content = mutableStateListOf(AACCell("Maison", colLieu, "FETCH"), AACCell("École", colLieu, "FETCH"))),
+            AACCell("Bonjour", colSocial, "FETCH")
+        )
+    }
 }
 
+// --- SOUS-COMPOSANTS DÉPORTÉS (Pour lisibilité) ---
+
 @Composable
-fun EditDialog(
-    cell: AACCell,
-    allButtons: List<AACCell>, // On passe la liste globale pour trouver les dossiers
-    onDelete: () -> Unit,
-    onRename: (String) -> Unit,
-    onMoveInList: (Int) -> Unit,
-    onMoveToFolder: (AACCell) -> Unit, // Nouvelle action
-    onDismiss: () -> Unit
+fun AdminMenu(
+    showMenu: Boolean, onMenuToggle: (Boolean) -> Unit, onSettings: () -> Unit, onHelp: () -> Unit,
+    onCalibration: () -> Unit, onStats: () -> Unit, onAdd: () -> Unit, onKioskToggle: () -> Unit,
+    isKioskMode: Boolean, isEditMode: Boolean, onEditModeToggle: (Boolean) -> Unit, onBackup: () -> Unit, onRestore: () -> Unit
 ) {
-    var newName by remember { mutableStateOf(cell.label) }
-    // On filtre pour ne proposer que les dossiers (et pas le bouton lui-même)
-    val availableFolders = allButtons.filter { it.isFolder && it != cell }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            Button(onClick = { onRename(newName) }) { Text("Enregistrer") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDelete) { Text("Supprimer", color = Color.Red) }
-        },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                TextField(value = newName, onValueChange = { newName = it }, label = { Text("Nom") })
-
-                Spacer(Modifier.height(16.dp))
-
-                Text("Réorganiser dans la grille :", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Button(onClick = { onMoveInList(-1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, null) }
-                    Button(onClick = { onMoveInList(1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
+    Box {
+        IconButton(onClick = { onMenuToggle(true) }, modifier = Modifier.size(60.dp).background(Color.White, CircleShape).border(1.dp, Color.Gray, CircleShape)) 
+        { Icon(Icons.Default.MoreVert, null) }
+        DropdownMenu(expanded = showMenu, onDismissRequest = { onMenuToggle(false) }) {
+            DropdownMenuItem(text = { Text("⚙️ Paramètres") }, onClick = { onMenuToggle(false); onSettings() })
+            DropdownMenuItem(text = { Text("❓ Aide & Tutoriel") }, onClick = { onMenuToggle(false); onHelp() })
+            DropdownMenuItem(text = { Text("🎯 Calibrer le tactile") }, onClick = { onMenuToggle(false); onCalibration() })
+            DropdownMenuItem(text = { Text("📊 Statistiques") }, onClick = { onMenuToggle(false); onStats() })
+            DropdownMenuItem(text = { Text(stringResource(R.string.btn_add)) }, leadingIcon = { Icon(Icons.Default.Add, null, tint = Color(0xFF4CAF50)) }, onClick = { onMenuToggle(false); onAdd() })
+            DropdownMenuItem(
+                text = { Text(if (isEditMode) "Quitter l'édition" else "Édition") },
+                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                onClick = { 
+                    onMenuToggle(false)
+                    onEditModeToggle(!isEditMode)
+                    Log.d("Nina-Debug", "🛠️ MODE ÉDITION CHANGÉ : ${!isEditMode}")
                 }
-
-                if (availableFolders.isNotEmpty()) {
-                    Spacer(Modifier.height(16.dp))
-                    Text("Déplacer vers un dossier :", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    LazyRow(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(availableFolders) { folder ->
-                            Button(
-                                onClick = { onMoveToFolder(folder) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(folder.colorLong))
-                            ) {
-                                Text("📂 ${folder.label}", color = Color.Black, fontSize = 12.sp)
-                            }
-                        }
-                    }
-                }
-            }
+            )
+            HorizontalDivider()
+            DropdownMenuItem(text = { Text(if (isKioskMode) "🔓 Désactiver Kiosque" else "🔒 Activer Mode Kiosque") }, onClick = { onMenuToggle(false); onKioskToggle() })
+            DropdownMenuItem(text = { Text("📤 Partager / Sauvegarder") }, onClick = { onMenuToggle(false); onBackup() })
+            DropdownMenuItem(text = { Text(stringResource(R.string.btn_restore)) }, onClick = { onMenuToggle(false); onRestore() })
         }
-    )
+    }
 }
 
-// Fonction à ajouter dans ton MainActivity ou en dehors
-fun saveImageLocally(context: Context, imageUrl: String, fileName: String): String? {
-    return try {
-        val file = File(context.filesDir, "$fileName.png")
-        URL(imageUrl).openStream().use { input ->
-            FileOutputStream(file).use { output ->
-                input.copyTo(output)
-            }
+@Composable
+fun GridSizeSelector(current: Int, onUpdate: (Int) -> Unit) {
+    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
+            IconButton(onClick = { if (current < 8) onUpdate(current + 1) }) { Icon(Icons.Default.KeyboardArrowUp, null) }
+            Text("$current", fontWeight = FontWeight.Black)
+            IconButton(onClick = { if (current > 1) onUpdate(current - 1) }) { Icon(Icons.Default.KeyboardArrowDown, null) }
         }
-        file.absolutePath
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
+    }
+}
+
+@Composable
+fun DialogManager(
+    showKeyboardDialog: Boolean, onKeyboardDismiss: () -> Unit, onKeyboardValidate: (AACCell) -> Unit,
+    showAdminChallenge: Boolean, onAdminSuccess: () -> Unit, onAdminDismiss: () -> Unit,
+    showAddDialog: Boolean, onAddDismiss: () -> Unit, onAddConfirm: (AACCell) -> Unit,
+    showSettings: Boolean, onSettingsDismiss: () -> Unit, onSettingsSave: (Long, Float, Float, Long, Boolean) -> Unit,
+    showHelp: Boolean, onHelpDismiss: () -> Unit,
+    showCalibration: Boolean, onCalibrationFinished: (Float, Float) -> Unit,
+    showWordFinder: Boolean, onWordFinderDismiss: () -> Unit,
+    showStats: Boolean, onStatsDismiss: () -> Unit, onStatsReset: () -> Unit,
+    showEditDialog: Boolean, cellToEdit: AACCell?, allButtons: List<AACCell>, currentButtons: MutableList<AACCell>, coreWords: MutableList<AACCell>, quickFires: MutableList<AACCell>,
+    onEditDelete: (AACCell) -> Unit, onEditSave: (AACCell, String, Long, String?, String?, Boolean, Boolean, Boolean) -> Unit, onEditMoveToFolder: (AACCell, AACCell?) -> Unit, onEditDismiss: () -> Unit
+) {
+    if (showKeyboardDialog) KeyboardInputDialog(onDismiss = onKeyboardDismiss, onValidate = onKeyboardValidate)
+    if (showAdminChallenge) AdminChallengeDialog(onDismiss = onAdminDismiss, onSuccess = onAdminSuccess)
+    if (showAddDialog) AddButtonDialog(onDismiss = onAddDismiss, onConfirm = onAddConfirm)
+    if (showSettings) SettingsDialog(0xFFFFFFFFL, 1.2f, 0.85f, 500L, false, onSettingsDismiss, onSettingsSave) // Simplifié pour l'exemple
+    if (showHelp) HelpDialog(onDismiss = onHelpDismiss)
+    if (showCalibration) CalibrationTest(onFinished = onCalibrationFinished)
+    if (showWordFinder) WordFinderDialog(allButtons = allButtons, onDismiss = onWordFinderDismiss)
+    if (showStats) StatsDialog(stats = emptyMap(), onDismiss = onStatsDismiss, onReset = onStatsReset)
+    if (showEditDialog && cellToEdit != null) EditDialog(cellToEdit, allButtons, onDelete = onEditDelete, onSave = onEditSave, onMoveInList = { _, _ -> }, onMoveToFolder = onEditMoveToFolder, onDismiss = onEditDismiss)
+}
+
+// Fonctions privées de logique
+private suspend fun updateCellsWithImages(vararg lists: MutableList<AACCell>) {
+    lists.forEach { list ->
+        list.forEachIndexed { i, cell ->
+            if (cell.imageUrl == "FETCH") {
+                try {
+                    val results = RetrofitInstance.arasaacApi.searchPictograms(cell.label.lowercase())
+                    if (results.isNotEmpty()) {
+                        list[i] = cell.copy(imageUrl = "https://static.arasaac.org/pictograms/${results.first()._id}/${results.first()._id}_300.png")
+                    }
+                } catch (e: Exception) {}
+            }
+            if (cell.isFolder) updateCellsWithImages(cell.content)
+        }
+    }
+}
+
+private fun updateCellInList(cell: AACCell?, core: MutableList<AACCell>, grid: MutableList<AACCell>, quick: MutableList<AACCell>, name: String, url: String?, audio: String?, color: Long, isQuick: Boolean, isHidden: Boolean) {
+    if (cell == null) return
+    val lists = listOf(core, grid, quick)
+    lists.forEach { list ->
+        val idx = list.indexOf(cell)
+        if (idx != -1) {
+            list[idx] = list[idx].copy(label = name, imageUrl = url, audioPath = audio, colorLong = color, isQuickPhrase = isQuick, isHidden = isHidden)
+        }
     }
 }

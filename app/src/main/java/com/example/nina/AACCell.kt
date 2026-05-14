@@ -13,8 +13,9 @@ data class AACCell(
     val imageUrl: String? = null,
     val audioPath: String? = null,
     val isFolder: Boolean = false,
+    val isQuickPhrase: Boolean = false,
+    val isHidden: Boolean = false,
     val imageRes: Int? = null,
     val content: SnapshotStateList<AACCell> = mutableStateListOf()
-
 )
 
