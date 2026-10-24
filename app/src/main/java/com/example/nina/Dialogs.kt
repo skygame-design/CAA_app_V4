@@ -61,6 +61,55 @@ fun SettingsSectionTitle(title: String) {
 }
 
 /**
+ * Formes d'un mot, ouvertes par un appui long (comme les "Word Forms" de TD Snap) :
+ * conjugaisons d'un verbe, ou singulier / pluriel d'un nom. Toucher une forme l'ajoute à la phrase.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun WordFormsDialog(cell: AACCell, forms: List<WordForm>, onPick: (WordForm) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = Color(0xFFF0F0F5),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!cell.imageUrl.isNullOrEmpty() && cell.imageUrl != "FETCH") {
+                    AsyncImage(model = cell.imageUrl, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(56.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+                Text(cell.label, fontWeight = FontWeight.Bold, fontSize = 24.sp)
+            }
+        },
+        text = {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                forms.forEach { form ->
+                    Card(
+                        onClick = { onPick(form) },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(cell.colorLong)),
+                        border = BorderStroke(2.dp, Color.White)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.widthIn(min = 110.dp).padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            Text(form.text, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = Color.DarkGray)
+                            form.hint?.let { Text(it, fontSize = 12.sp, color = Color.Gray) }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel), color = Color(0xFF4A5D91)) }
+        }
+    )
+}
+
+/**
  * Champ optionnel "Texte prononcé" : ce que Nina dit quand on touche le picto.
  * Vide = le texte du picto est prononcé.
  */

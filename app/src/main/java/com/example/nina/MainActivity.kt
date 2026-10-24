@@ -119,6 +119,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     val activity = context as? android.app.Activity
 
                     var usageStats by remember { mutableStateOf(loadStats(context)) }
+
+                    // Formes du mot (appui long hors mode admin) : picto concerné, ses formes, et s'il vient de la grille
+                    var wordFormsCell by remember { mutableStateOf<AACCell?>(null) }
+                    var wordForms by remember { mutableStateOf<List<WordForm>>(emptyList()) }
+                    var wordFormsFromGrid by remember { mutableStateOf(false) }
+                    val openWordForms: (AACCell, Boolean) -> Unit = { cell, fromGrid ->
+                        val forms = if (cell.isFolder || cell.isQuickPhrase) emptyList() else FrenchMorphology.wordForms(cell.label)
+                        if (forms.size > 1) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            wordFormsCell = cell; wordForms = forms; wordFormsFromGrid = fromGrid
+                        }
+                    }
                     var showStatsDialog by remember { mutableStateOf(false) }
 
                     // Détermine les boutons à afficher selon si on est dans un dossier ou non
@@ -407,6 +419,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                                 dndState.draggedCell = cell
                                                                 dndState.dragOffset = posInRoot
                                                                 dndState.isDragging = true
+                                                            } else {
+                                                                openWordForms(cell, false) // false : picto des Core Words
                                                             }
                                                         }
                                                     )
@@ -494,6 +508,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                                         dndState.dragOffset = posInRoot
                                                                         dndState.isDragging = true
                                                                         Log.d("Nina-Debug", "🚀 Drag démarré pour ${cell.label} à $posInRoot")
+                                                                    } else {
+                                                                        openWordForms(cell, true) // true : picto de la grille
                                                                     }
                                                                 }
                                                             )
@@ -603,6 +619,21 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                 }
                             }
                         }
+                    }
+
+                    wordFormsCell?.let { baseCell ->
+                        WordFormsDialog(
+                            cell = baseCell, forms = wordForms,
+                            onPick = { form ->
+                                // La forme choisie remplace le mot de base dans la phrase, et c'est elle qui est prononcée
+                                phrase.add(baseCell.copy(id = newCellId(), label = form.text, spokenText = null, audioPath = null))
+                                speakText(form.text, voicePitch, voiceRate)
+                                trackWordUsage(baseCell, context, { usageStats = it })
+                                if (wordFormsFromGrid && autoReturnHome) navigationStack.clear()
+                                wordFormsCell = null
+                            },
+                            onDismiss = { wordFormsCell = null }
+                        )
                     }
 
                     // --- GESTION DES BOITES DE DIALOGUE (Overlay) ---
