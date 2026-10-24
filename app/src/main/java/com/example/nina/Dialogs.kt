@@ -63,6 +63,100 @@ fun SettingsSectionTitle(title: String) {
 }
 
 /**
+ * Choix d'une grille prête (Premiers mots, Vocabulaire courant, Vocabulaire étendu), avec un aperçu :
+ * mots de l'accueil dans leur disposition réelle, dossiers et nombre de mots, phrases rapides.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun VocabularyPackDialog(currentColumns: Int, onDismiss: () -> Unit, onApply: (VocabularyPack) -> Unit) {
+    var selected by remember { mutableStateOf(VocabularyPacks.all.first()) }
+    val preview = remember(selected) { selected.build() }
+    val accent = Color(0xFF4A5D91)
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF0F0F5)) {
+            Column(modifier = Modifier.systemBarsPadding()) {
+                TopAppBar(
+                    title = { Text("Grilles prêtes", fontWeight = FontWeight.Bold) },
+                    navigationIcon = { IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Fermer") } },
+                    actions = {
+                        Button(onClick = { onApply(selected) }, colors = ButtonDefaults.buttonColors(containerColor = accent), modifier = Modifier.padding(end = 12.dp)) {
+                            Text("Installer « ${selected.name} »")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+                Row(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    // Les grilles proposées
+                    Column(modifier = Modifier.width(340.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        VocabularyPacks.all.forEach { pack ->
+                            val isSelected = pack == selected
+                            Card(
+                                onClick = { selected = pack },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFFE3E7F5) else Color.White),
+                                border = BorderStroke(if (isSelected) 3.dp else 1.dp, if (isSelected) accent else Color.LightGray)
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                                    Text(pack.level.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Black, color = accent)
+                                    Text(pack.name, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                                    Text(pack.description, fontSize = 13.sp, color = Color.DarkGray, modifier = Modifier.padding(top = 4.dp))
+                                }
+                            }
+                        }
+                        Text(
+                            "Les grilles remplacent tous les pictos actuels. La disposition actuelle est gardée : " +
+                            "⋮ › « Revenir à la disposition précédente » la remet en place.",
+                            fontSize = 12.sp, color = Color.Gray
+                        )
+                    }
+
+                    // Aperçu de la grille sélectionnée
+                    Column(
+                        modifier = Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        val total = VocabularyPacks.wordCount(preview)
+                        Text(
+                            "$total mots · ${preview.buttons.size} à l'accueil · ${preview.coreWords.orEmpty().size} dossiers · " +
+                            "${selected.columns} pictos par rangée" + if (selected.columns != currentColumns) " (actuellement $currentColumns)" else "",
+                            fontWeight = FontWeight.Bold, color = accent
+                        )
+                        HelpCard("Accueil (mots essentiels, dans leur disposition)") {
+                            preview.buttons.chunked(selected.columns).forEach { row ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 3.dp)) {
+                                    row.forEach { cell ->
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.weight(1f).height(36.dp).background(Color(cell.colorLong), RoundedCornerShape(8.dp))
+                                        ) { Text(cell.label, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+                                    }
+                                    repeat(selected.columns - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+                                }
+                            }
+                        }
+                        HelpCard("Dossiers (colonne de gauche)") {
+                            preview.coreWords.orEmpty().forEach { folder ->
+                                val subFolders = folder.content.filter { it.isFolder }
+                                val detail = if (subFolders.isEmpty()) folder.content.joinToString(", ") { it.label }
+                                             else subFolders.joinToString(" · ") { "${it.label} (${it.content.size})" }
+                                Row(modifier = Modifier.padding(vertical = 4.dp)) {
+                                    Text("📂 ${folder.label}", fontWeight = FontWeight.Bold, modifier = Modifier.width(160.dp))
+                                    Text(detail, fontSize = 13.sp, color = Color.DarkGray, modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                        HelpCard("Phrases rapides (colonne de droite)") {
+                            Text(preview.quickFires.orEmpty().joinToString(" · ") { it.label }, fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Recherche d'images dans toutes les banques (ARASAAC, Mulberry, Sclera, Tawasol, Twemoji…),
  * avec un filtre par banque et la licence de l'image choisie (à respecter et créditer).
  * L'image choisie est téléchargée dans la tablette à l'enregistrement du picto.
@@ -1466,7 +1560,7 @@ private val helpTopics = listOf(
             HelpTip("À droite de la barre de phrase, la loupe 🔍 cherche un mot et peut montrer où il se trouve ; le clavier ⌨ permet d'écrire un mot qui n'a pas de picto."),
             HelpTip(
                 "Bien organiser : un mot = une seule place (l'enfant mémorise le geste). Gardez 6 à 8 grands dossiers et rangez le reste en sous-dossiers. " +
-                "Mode adulte › ⋮ › « Disposition recommandée » installe un point de départ, à adapter avec l'orthophoniste.",
+                "Mode adulte › ⋮ › « Grilles prêtes » installe une grille complète (3 niveaux, de 12 à 30 mots à l'accueil), à adapter ensuite avec l'orthophoniste.",
                 isNew = true
             )
         )
@@ -1563,7 +1657,7 @@ private val helpTopics = listOf(
                     "Statistiques" to "suivi de l'utilisation",
                     "Aide" to "cette aide",
                     "− 4 par rangée +" to "taille de la grille, de 1 à 8 pictos par rangée",
-                    "⋮" to "calibrer le tactile, mode Kiosque, partager / restaurer la sauvegarde, disposition recommandée",
+                    "⋮" to "calibrer le tactile, mode Kiosque, partager / restaurer la sauvegarde, grilles prêtes",
                     "Verrouiller" to "referme le mode adulte (l'édition s'arrête aussi)"
                 )
             ),
@@ -1850,7 +1944,7 @@ private fun HelpBlockView(block: HelpBlock) {
 }
 
 @Composable
-private fun HelpCard(title: String?, content: @Composable ColumnScope.() -> Unit) {
+internal fun HelpCard(title: String?, content: @Composable ColumnScope.() -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(16.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
             title?.let { Text(it, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = HelpAccent, modifier = Modifier.padding(bottom = 8.dp)) }

@@ -188,7 +188,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
                     }
 
-                    // Disposition recommandée : confirmation, et sauvegarde de l'ancienne disposition pour pouvoir revenir en arrière
+                    // Grilles prêtes : sauvegarde de l'ancienne disposition pour pouvoir revenir en arrière
                     val prefs = context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE)
                     var showRecommendedDialog by remember { mutableStateOf(false) }
                     var hasPreviousLayout by remember { mutableStateOf(prefs.contains("layout_before_recommended")) }
@@ -744,26 +744,19 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     }
 
                     if (showRecommendedDialog) {
-                        AlertDialog(
-                            onDismissRequest = { showRecommendedDialog = false },
-                            title = { Text("Disposition recommandée", fontWeight = FontWeight.Bold) },
-                            text = {
-                                Text(
-                                    "La grille d'accueil reçoit les mots essentiels (moi, vouloir, encore, pas…), " +
-                                    "la colonne de gauche les dossiers sous 🏠 Accueil, la colonne de droite oui, non, bonjour, merci et toilettes.\n\n" +
-                                    "Tous les pictos actuels sont remplacés. L'ancienne disposition est gardée : " +
-                                    "⋮ › « Revenir à la disposition précédente » la remet en place."
-                                )
-                            },
-                            confirmButton = {
-                                Button(onClick = {
-                                    prefs.edit().putString("layout_before_recommended", GsonInstance.gson.toJson(NinaBackup(boutons.toList(), coreWords.toList(), quickFires.toList()))).apply()
-                                    hasPreviousLayout = true
-                                    applyLayout(recommendedLayout())
-                                    showRecommendedDialog = false
-                                }) { Text("Appliquer") }
-                            },
-                            dismissButton = { TextButton(onClick = { showRecommendedDialog = false }) { Text("Annuler") } }
+                        VocabularyPackDialog(
+                            currentColumns = columnCount,
+                            onDismiss = { showRecommendedDialog = false },
+                            onApply = { pack ->
+                                // On garde la disposition actuelle pour pouvoir revenir en arrière
+                                prefs.edit().putString("layout_before_recommended", GsonInstance.gson.toJson(NinaBackup(boutons.toList(), coreWords.toList(), quickFires.toList()))).apply()
+                                hasPreviousLayout = true
+                                applyLayout(pack.build())
+                                // Taille de grille conseillée pour que les mots essentiels tiennent sur une page
+                                columnCount = pack.columns
+                                prefs.edit().putInt("column_count", pack.columns).apply()
+                                showRecommendedDialog = false
+                            }
                         )
                     }
 
@@ -957,51 +950,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         tts?.shutdown(); super.onDestroy()
     }
 
-    // --- PACK DE DÉMARRAGE ET DISPOSITION RECOMMANDÉE ---
+    // --- PACK DE DÉMARRAGE (voir VocabularyPacks pour les grilles prêtes) ---
 
-    private fun getDefaultCoreWords() = recommendedLayout().coreWords.orEmpty()
-    private fun getDefaultQuickFires() = recommendedLayout().quickFires.orEmpty()
-    private fun getStarterPack(): List<AACCell> = recommendedLayout().buttons
-
-    /**
-     * Disposition recommandée (principe « Core First » de TD Snap) : un mot = une seule place.
-     * - Grille d'accueil : les mots essentiels, à positions fixes. À 4 pictos par rangée, chaque colonne
-     *   suit le code couleur et l'ordre de la phrase : qui (jaune) → action (vert) → encore/fini → petits mots.
-     * - Colonne de gauche : les dossiers (catégories), sous la case 🏠 Accueil.
-     * - Colonne de droite : le social et l'urgent, dits tout de suite.
-     * C'est un point de départ, à adapter avec l'orthophoniste.
-     */
-    private fun recommendedLayout(): NinaBackup {
-        val colPersonne = 0xFFFFF9C4L; val colAction = 0xFFC8E6C9L; val colObjet = 0xFFFFCC80L
-        val colDesc = 0xFFBBDEFBL; val colSocial = 0xFFF8BBD0L; val colLieu = 0xFFE1BEE7L
-        val colPetitMot = 0xFFEEEEEEL
-
-        fun word(label: String, color: Long) = AACCell(label, color, "FETCH")
-        // Mots ambigus : la recherche ARASAAC donnerait un pied pour « pas » et du calcium pour « ça »
-        fun arasaac(label: String, color: Long, id: Int) = AACCell(label, color, "https://static.arasaac.org/pictograms/$id/${id}_300.png")
-        fun folder(label: String, color: Long, vararg words: AACCell) =
-            AACCell(label, color, "FETCH", isFolder = true, content = mutableStateListOf(*words))
-        fun quick(label: String, color: Long, spoken: String? = null) =
-            AACCell(label, color, "FETCH", isQuickPhrase = true, spokenText = spoken)
-
-        val grid = listOf(
-            word("Moi", colPersonne), word("Vouloir", colAction), word("Encore", colSocial), word("Avec", colPetitMot),
-            word("Toi", colPersonne), word("Aller", colAction), word("Fini", colSocial), arasaac("Pas", colPetitMot, 5525),
-            word("Lui", colPersonne), word("Aider", colAction), arasaac("Ça", colPetitMot, 7091), word("Ici", colPetitMot)
-        )
-        val folders = listOf(
-            folder("Actions", colAction, word("Manger", colAction), word("Boire", colAction)),
-            folder("Nourriture", colObjet, word("Eau", colObjet), word("Gâteau", colObjet)),
-            folder("Personnes", colPersonne, word("Maman", colPersonne), word("Papa", colPersonne)),
-            folder("Émotions", colDesc, word("Content", colDesc), word("Triste", colDesc)),
-            folder("Lieux", colLieu, word("Maison", colLieu), word("École", colLieu))
-        )
-        val quickPhrases = listOf(
-            quick("Oui", colAction), quick("Non", 0xFFFFCDD2L), quick("Bonjour", colPersonne), quick("Merci", colDesc),
-            quick("Toilettes", colLieu, "J'ai besoin d'aller aux toilettes")
-        )
-        return NinaBackup(grid, folders, quickPhrases)
-    }
+    private fun getDefaultCoreWords() = VocabularyPacks.default.build().coreWords.orEmpty()
+    private fun getDefaultQuickFires() = VocabularyPacks.default.build().quickFires.orEmpty()
+    private fun getStarterPack(): List<AACCell> = VocabularyPacks.default.build().buttons
 }
 
 // --- SOUS-COMPOSANTS DÉPORTÉS (Pour lisibilité) ---
@@ -1131,7 +1084,7 @@ fun AdminToolbar(
                 DropdownMenuItem(text = { Text("📤 Partager / Sauvegarder") }, onClick = { onMoreToggle(false); onBackup() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.btn_restore)) }, onClick = { onMoreToggle(false); onRestore() })
                 HorizontalDivider()
-                DropdownMenuItem(text = { Text("🧩 Disposition recommandée…") }, onClick = { onMoreToggle(false); onRecommendedLayout() })
+                DropdownMenuItem(text = { Text("🧩 Grilles prêtes…") }, onClick = { onMoreToggle(false); onRecommendedLayout() })
                 onRestorePreviousLayout?.let { restore ->
                     DropdownMenuItem(text = { Text("↩ Revenir à la disposition précédente") }, onClick = { onMoreToggle(false); restore() })
                 }
