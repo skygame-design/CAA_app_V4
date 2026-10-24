@@ -196,21 +196,21 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         // 1. Est-ce qu'on lâche dans la barre de gauche (Core Words) ?
                         if (sidebarRect.contains(screenPos)) {
                             if (!coreWords.any { it.label == droppedCell.label }) {
-                                coreWords.add(droppedCell.copy(isQuickPhrase = false))
+                                coreWords.add(droppedCell.copy(id = newCellId(), isQuickPhrase = false)) // Copie : nouvel id
                                 saveCoreWords(coreWords)
                             }
                         } 
                         // 2. Est-ce qu'on lâche dans la barre de droite (Quick Fires) ?
                         else if (quickFiresRect.contains(screenPos)) {
                             if (!quickFires.any { it.label == droppedCell.label }) {
-                                quickFires.add(droppedCell.copy(isQuickPhrase = true))
+                                quickFires.add(droppedCell.copy(id = newCellId(), isQuickPhrase = true)) // Copie : nouvel id
                                 saveQuickFires(quickFires)
                             }
                         }
                         else if (target != null && target != droppedCell) {
                             // 3. Logique d'Advanced Drop (Swap / Insert)
-                            val draggedIndex = currentButtons.indexOf(droppedCell)
-                            val targetIndex = currentButtons.indexOf(target)
+                            val draggedIndex = currentButtons.indexOfCell(droppedCell)
+                            val targetIndex = currentButtons.indexOfCell(target)
                             
                             if (draggedIndex != -1 && targetIndex != -1) {
                                 when (mode) {
@@ -221,7 +221,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     }
                                     DropTargetMode.INSERT_BEFORE, DropTargetMode.INSERT_AFTER -> {
                                         currentButtons.removeAt(draggedIndex)
-                                        var newTargetIndex = currentButtons.indexOf(target)
+                                        var newTargetIndex = currentButtons.indexOfCell(target)
                                         if (mode == DropTargetMode.INSERT_AFTER) {
                                             newTargetIndex += 1
                                         }
@@ -396,7 +396,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                                 cellToEdit = cell
                                                                 showEditDialog = true
                                                             } else {
-                                                                speakText(cell.label, voicePitch, voiceRate)
+                                                                playCellAudio(cell, voicePitch, voiceRate)
                                                                 trackWordUsage(cell, context, { usageStats = it })
                                                                 if (!cell.isQuickPhrase) phrase.add(cell)
                                                             }
@@ -433,13 +433,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             },
                                             label = "GridAnimation"
                                         ) { targetButtons ->
-                                            // Clés uniques : le libellé, suffixé (#2, #3...) en cas de doublon pour éviter un crash de LazyGrid
+                                            // Clés uniques : l'id du picto, suffixé (#2, #3...) par sécurité en cas de doublon pour éviter un crash de LazyGrid
                                             val gridKeys = buildList {
                                                 val seen = mutableMapOf<String, Int>()
                                                 targetButtons.forEach { cell ->
-                                                    val n = (seen[cell.label] ?: 0) + 1
-                                                    seen[cell.label] = n
-                                                    add(if (n == 1) cell.label else "${cell.label}#$n")
+                                                    val n = (seen[cell.id] ?: 0) + 1
+                                                    seen[cell.id] = n
+                                                    add(if (n == 1) cell.id else "${cell.id}#$n")
                                                 }
                                             }
                                             LazyVerticalGrid(
@@ -573,7 +573,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                             cellToEdit = cell
                                                             showEditDialog = true
                                                         } else {
-                                                            speakText(cell.label, voicePitch, voiceRate)
+                                                            playCellAudio(cell, voicePitch, voiceRate)
                                                             trackWordUsage(cell, context, { usageStats = it })
                                                         }
                                                     },
@@ -630,17 +630,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         showStats = showStatsDialog, usageStats = usageStats, onStatsDismiss = { showStatsDialog = false }, onStatsReset = { usageStats = emptyMap(); saveStats(context, emptyMap()) },
                         showEditDialog = showEditDialog, cellToEdit = cellToEdit, allButtons = boutons,
                         onEditDelete = { targetCell ->
-                            if (coreWords.contains(targetCell)) { coreWords.remove(targetCell); saveCoreWords(coreWords) }
-                            else if (quickFires.contains(targetCell)) { quickFires.remove(targetCell); saveQuickFires(quickFires) }
-                            else { currentButtons.remove(targetCell); saveButtons(boutons) }
+                            if (coreWords.removeAll { it.id == targetCell.id }) saveCoreWords(coreWords)
+                            else if (quickFires.removeAll { it.id == targetCell.id }) saveQuickFires(quickFires)
+                            else { currentButtons.removeAll { it.id == targetCell.id }; saveButtons(boutons) }
                             showEditDialog = false
                         },
-                        onEditSave = { targetCell, newName, newColor, newUrl, newAudio, isFld, isQuick, isHid, moveRequested, moveTarget ->
+                        onEditSave = { edited, moveRequested, moveTarget ->
                             scope.launch(Dispatchers.IO) {
-                                val finalUrl = if (newUrl?.startsWith("http") == true) saveImageLocally(context, newUrl, "${newName.trim()}_${System.currentTimeMillis()}") else newUrl
+                                val newUrl = edited.imageUrl
+                                val finalUrl = if (newUrl?.startsWith("http") == true) saveImageLocally(context, newUrl, "${edited.label.trim()}_${System.currentTimeMillis()}") else newUrl
                                 withContext(Dispatchers.Main) {
                                     // On modifie d'abord, puis on déplace la version modifiée (sinon les modifications étaient perdues)
-                                    val updated = updateCellInList(targetCell, coreWords, currentButtons, quickFires, name = newName, url = finalUrl, audio = newAudio, color = newColor, isFolder = isFld, isQuick = isQuick, isHidden = isHid)
+                                    val updated = replaceCellInLists(edited.copy(imageUrl = finalUrl), coreWords, currentButtons, quickFires)
                                     if (moveRequested && updated != null) {
                                         moveCell(updated, moveTarget?.content ?: boutons, coreWords, currentButtons, quickFires)
                                     }
@@ -683,10 +684,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     setOnCompletionListener { release() }
                 }
             } catch (e: Exception) {
-                speakText(cell.label, pitch, rate)
+                speakText(cell.textToSpeak, pitch, rate)
             }
         } else {
-            speakText(cell.label, pitch, rate)
+            speakText(cell.textToSpeak, pitch, rate)
         }
     }
 
@@ -707,7 +708,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private fun loadButtons(): List<AACCell> {
         val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString("saved_buttons", null)
         return if (json != null) {
-            try { GsonInstance.gson.fromJson(json, object : TypeToken<List<AACCell>>() {}.type) } catch (e: Exception) { getStarterPack() }
+            try { normalizeCells(GsonInstance.gson.fromJson<List<AACCell>>(json, object : TypeToken<List<AACCell>>() {}.type)) } catch (e: Exception) { getStarterPack() }
         } else getStarterPack()
     }
 
@@ -719,7 +720,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private fun loadCoreWords(): List<AACCell> {
         val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString("saved_core_words", null)
         return if (json != null) {
-            try { GsonInstance.gson.fromJson(json, object : TypeToken<List<AACCell>>() {}.type) } catch (e: Exception) { getDefaultCoreWords() }
+            try { normalizeCells(GsonInstance.gson.fromJson<List<AACCell>>(json, object : TypeToken<List<AACCell>>() {}.type)) } catch (e: Exception) { getDefaultCoreWords() }
         } else getDefaultCoreWords()
     }
 
@@ -731,7 +732,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private fun loadQuickFires(): List<AACCell> {
         val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString("saved_quick_fires", null)
         return if (json != null) {
-            try { GsonInstance.gson.fromJson(json, object : TypeToken<List<AACCell>>() {}.type) } catch (e: Exception) { getDefaultQuickFires() }
+            try { normalizeCells(GsonInstance.gson.fromJson<List<AACCell>>(json, object : TypeToken<List<AACCell>>() {}.type)) } catch (e: Exception) { getDefaultQuickFires() }
         } else getDefaultQuickFires()
     }
 
@@ -847,7 +848,7 @@ fun DialogManager(
     showWordFinder: Boolean, onWordFinderDismiss: () -> Unit,
     showStats: Boolean, usageStats: Map<String, Int>, onStatsDismiss: () -> Unit, onStatsReset: () -> Unit,
     showEditDialog: Boolean, cellToEdit: AACCell?, allButtons: List<AACCell>,
-    onEditDelete: (AACCell) -> Unit, onEditSave: (AACCell, String, Long, String?, String?, Boolean, Boolean, Boolean, Boolean, AACCell?) -> Unit, onEditDismiss: () -> Unit
+    onEditDelete: (AACCell) -> Unit, onEditSave: (AACCell, Boolean, AACCell?) -> Unit, onEditDismiss: () -> Unit
 ) {
     if (showKeyboardDialog) KeyboardInputDialog(onDismiss = onKeyboardDismiss, onValidate = onKeyboardValidate)
     if (showAdminChallenge) AdminChallengeDialog(onDismiss = onAdminDismiss, onSuccess = onAdminSuccess)
@@ -877,29 +878,31 @@ private suspend fun updateCellsWithImages(vararg lists: MutableList<AACCell>) {
     }
 }
 
+/** Position d'un picto dans la liste, retrouvé par son id (même s'il a été modifié entre-temps). */
+private fun List<AACCell>.indexOfCell(cell: AACCell): Int = indexOfFirst { it.id == cell.id }
+
 /**
- * Applique les modifications à la cellule là où elle se trouve et renvoie la version modifiée.
+ * Remplace le picto de même id par sa version modifiée, dans la liste où il se trouve.
+ * Renvoie la version modifiée, ou null si le picto n'a pas été trouvé.
  */
-private fun updateCellInList(cell: AACCell?, core: MutableList<AACCell>, grid: MutableList<AACCell>, quick: MutableList<AACCell>, name: String, url: String?, audio: String?, color: Long, isFolder: Boolean, isQuick: Boolean, isHidden: Boolean): AACCell? {
-    if (cell == null) return null
-    var updated: AACCell? = null
-    val lists = listOf(core, grid, quick)
+private fun replaceCellInLists(edited: AACCell, vararg lists: MutableList<AACCell>): AACCell? {
+    var found = false
     lists.forEach { list ->
-        val idx = list.indexOf(cell)
+        val idx = list.indexOfCell(edited)
         if (idx != -1) {
-            updated = list[idx].copy(label = name, imageUrl = url, audioPath = audio, colorLong = color, isFolder = isFolder, isQuickPhrase = isQuick, isHidden = isHidden)
-            list[idx] = updated!!
+            list[idx] = edited
+            found = true
         }
     }
-    return updated
+    return if (found) edited else null
 }
 
 /**
  * Retire la cellule de la liste où elle se trouve (grille, Core Words ou Quick Fires) et l'ajoute à la destination.
  */
 private fun moveCell(cell: AACCell, destination: MutableList<AACCell>, vararg sources: MutableList<AACCell>) {
-    val source = sources.firstOrNull { it.contains(cell) } ?: return
+    val source = sources.firstOrNull { it.indexOfCell(cell) != -1 } ?: return
     if (source === destination) return
-    source.remove(cell)
+    source.removeAt(source.indexOfCell(cell))
     destination.add(cell)
 }

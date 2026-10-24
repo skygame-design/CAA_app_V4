@@ -77,12 +77,17 @@ data class NinaBackup(
  */
 fun parseBackup(json: String): NinaBackup {
     val root = JsonParser.parseString(json)
-    return if (root.isJsonArray) {
+    val backup = if (root.isJsonArray) {
         val buttons: List<AACCell> = GsonInstance.gson.fromJson(root, object : TypeToken<List<AACCell>>() {}.type)
         NinaBackup(buttons)
     } else {
         GsonInstance.gson.fromJson(root, NinaBackup::class.java)
     }
+    return NinaBackup(
+        buttons = normalizeCells(backup.buttons),
+        coreWords = backup.coreWords?.let { normalizeCells(it) },
+        quickFires = backup.quickFires?.let { normalizeCells(it) }
+    )
 }
 
 /**

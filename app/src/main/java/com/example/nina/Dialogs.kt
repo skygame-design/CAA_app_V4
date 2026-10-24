@@ -60,6 +60,23 @@ fun SettingsSectionTitle(title: String) {
     )
 }
 
+/**
+ * Champ optionnel "Texte prononcé" : ce que Nina dit quand on touche le picto.
+ * Vide = le texte du picto est prononcé.
+ */
+@Composable
+fun SpokenTextField(value: String, label: String, onValueChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text("Texte prononcé (optionnel)") },
+        placeholder = { Text(label.ifBlank { "Ex. : J'ai besoin d'aller aux toilettes" }, color = Color.LightGray) },
+        supportingText = { Text("Dit à voix haute quand on touche le picto. La phrase garde le texte du picto.") },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp)
+    )
+}
+
 @Composable
 fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     Card(
@@ -86,6 +103,7 @@ fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 fun AddButtonDialog(onDismiss: () -> Unit, onConfirm: (AACCell) -> Unit) {
     val context = LocalContext.current
     var label by remember { mutableStateOf(value = "") }
+    var spokenText by remember { mutableStateOf(value = "") }
     var isFolder by remember { mutableStateOf(value = false) }
     var isQuickPhrase by remember { mutableStateOf(value = false) }
     var isHidden by remember { mutableStateOf(value = false) }
@@ -132,7 +150,7 @@ fun AddButtonDialog(onDismiss: () -> Unit, onConfirm: (AACCell) -> Unit) {
                                     val finalUrl = if (selectedUrl?.startsWith("http") == true) saveImageLocally(context, selectedUrl!!, "${label.trim()}_${System.currentTimeMillis()}") else selectedUrl
                                     withContext(Dispatchers.Main) {
                                         isSaving = false
-                                        onConfirm(AACCell(label = label, colorLong = selectedColor, imageUrl = finalUrl, audioPath = audioPath, isFolder = isFolder, isQuickPhrase = isQuickPhrase, isHidden = isHidden))
+                                        onConfirm(AACCell(label = label, colorLong = selectedColor, imageUrl = finalUrl, audioPath = audioPath, isFolder = isFolder, isQuickPhrase = isQuickPhrase, isHidden = isHidden, spokenText = spokenText.trim().ifBlank { null }))
                                     }
                                 }
                             },
@@ -163,6 +181,7 @@ fun AddButtonDialog(onDismiss: () -> Unit, onConfirm: (AACCell) -> Unit) {
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         )
+                        SpokenTextField(value = spokenText, label = label, onValueChange = { spokenText = it })
                     }
 
                     SettingsSectionTitle("Apparence")
@@ -308,12 +327,13 @@ fun EditDialog(
     cell: AACCell,
     allCells: List<AACCell>,
     onDelete: (AACCell) -> Unit,
-    // Les deux derniers paramètres : déplacement demandé, et dossier cible (null = Racine)
-    onSave: (AACCell, String, Long, String?, String?, Boolean, Boolean, Boolean, Boolean, AACCell?) -> Unit,
+    // Picto modifié (même id), déplacement demandé, et dossier cible (null = Racine)
+    onSave: (AACCell, Boolean, AACCell?) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     var name by remember { mutableStateOf(cell.label) }
+    var spokenText by remember { mutableStateOf(cell.spokenText.orEmpty()) }
     var imageUrl by remember { mutableStateOf(cell.imageUrl) }
     var color by remember { mutableLongStateOf(cell.colorLong) }
     var isFolder by remember { mutableStateOf(cell.isFolder) }
@@ -447,6 +467,7 @@ fun EditDialog(
                                     shape = RoundedCornerShape(12.dp),
                                     singleLine = true
                                 )
+                                SpokenTextField(value = spokenText, label = name, onValueChange = { spokenText = it })
 
                                 HorizontalDivider()
 
@@ -720,7 +741,12 @@ fun EditDialog(
                     Box(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         Button(
                             onClick = {
-                                onSave(cell, name, color, imageUrl, audioPath, isFolder, isQuickPhrase, isHidden, isMoveRequested, pendingFolderMove)
+                                val edited = cell.copy(
+                                    label = name, colorLong = color, imageUrl = imageUrl, audioPath = audioPath,
+                                    isFolder = isFolder, isQuickPhrase = isQuickPhrase, isHidden = isHidden,
+                                    spokenText = spokenText.trim().ifBlank { null }
+                                )
+                                onSave(edited, isMoveRequested, pendingFolderMove)
                                 onDismiss()
                             },
                             modifier = Modifier.fillMaxWidth().height(56.dp),
