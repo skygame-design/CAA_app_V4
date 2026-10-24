@@ -114,30 +114,40 @@ fun saveStats(context: Context, stats: Map<String, Int>) {
 data class WordGuide(val cell: AACCell, val steps: List<AACCell>, val place: String)
 
 /**
- * Recherche un mot dans la grille (y compris dans les dossiers) et dans les deux colonnes.
+ * Recherche un mot dans la grille, dans la colonne de gauche (y compris dans ses dossiers) et dans les phrases rapides.
  * Les pictos masqués, et le contenu des dossiers masqués, sont ignorés : on ne peut pas les montrer.
  */
 fun findWordGuides(query: String, buttons: List<AACCell>, coreWords: List<AACCell>, quickFires: List<AACCell>): List<WordGuide> {
     if (query.isBlank()) return emptyList()
     val results = mutableListOf<WordGuide>()
 
-    fun searchGrid(cells: List<AACCell>, folders: List<AACCell>) {
+    // folders : les dossiers à toucher avant d'arriver au mot ; root : nom de la zone de départ
+    fun search(cells: List<AACCell>, folders: List<AACCell>, root: String) {
         for (cell in cells) {
             if (cell.isHidden) continue
             if (cell.label.contains(query, ignoreCase = true)) {
-                val place = (listOf("Accueil") + folders.map { it.label }).joinToString(" > ")
+                val place = (listOf(root) + folders.map { it.label }).joinToString(" > ")
                 results += WordGuide(cell, folders + cell, place)
             }
-            if (cell.isFolder) searchGrid(cell.content, folders + cell)
+            if (cell.isFolder) search(cell.content, folders + cell, root)
         }
     }
 
-    searchGrid(buttons, emptyList())
-    coreWords.filter { !it.isHidden && it.label.contains(query, ignoreCase = true) }
-        .forEach { results += WordGuide(it, listOf(it), "Colonne de gauche") }
+    search(buttons, emptyList(), "Accueil")
+    search(coreWords, emptyList(), "Colonne de gauche")
     quickFires.filter { !it.isHidden && it.label.contains(query, ignoreCase = true) }
         .forEach { results += WordGuide(it, listOf(it), "Phrases rapides") }
     return results
+}
+
+/** Tous les dossiers (grille et colonne de gauche, sous-dossiers compris), pour « Déplacer vers ». */
+fun allFolders(vararg lists: List<AACCell>): List<AACCell> {
+    val result = mutableListOf<AACCell>()
+    fun collect(cells: List<AACCell>) {
+        cells.forEach { if (it.isFolder) { result += it; collect(it.content) } }
+    }
+    lists.forEach { collect(it) }
+    return result
 }
 
 class AudioRecorder(private val context: Context) {

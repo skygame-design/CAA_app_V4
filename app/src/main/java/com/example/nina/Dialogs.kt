@@ -414,7 +414,9 @@ fun EditDialog(
 
     val searchResults = remember { mutableStateListOf<OpenSymbolResponse>() }
     val scope = rememberCoroutineScope()
-    val availableFolders = allCells.filter { it.isFolder && it != cell }
+    // Un dossier ne peut aller ni dans lui-même ni dans un de ses sous-dossiers
+    val ownFolderIds = remember(cell) { allFolders(listOf(cell)).map { it.id }.toSet() + cell.id }
+    val availableFolders = allCells.filter { it.isFolder && it.id !in ownFolderIds }
 
     val fitzgeraldThemes = listOf(
         Pair(Color(0xFFFFD54F), "Personnes (Sujets, Pronoms)"),
@@ -1438,13 +1440,18 @@ private val helpTopics = listOf(
             HelpSteps(
                 "Les zones de l'écran", listOf(
                     "Barre de phrase (en haut) : les mots choisis s'y alignent. Le bouton vert ▶, ou un appui sur la barre, lit la phrase.",
-                    "Mots essentiels (colonne de gauche) : les mots les plus utiles, toujours visibles.",
-                    "Grille (au centre) : le vocabulaire, rangé en dossiers. Elle ne défile jamais ; s'il y a trop de pictos, les boutons ◀ ▶ en bas changent de page. Le bouton ← revient en arrière.",
-                    "Phrases rapides (colonne de droite, éclair ⚡) : dites tout de suite, sans passer par la phrase.",
+                    "Dossiers (colonne de gauche) : 🏠 Accueil toujours en haut, puis les catégories (Actions, Nourriture…). Un toucher ouvre le dossier depuis n'importe où ; le dossier ouvert est encadré. S'il y a trop de dossiers, ▲ ▼ changent de page.",
+                    "Grille (au centre) : à l'accueil, les mots essentiels (moi, vouloir, encore, pas…) toujours à la même place ; dans un dossier, ses mots. Elle ne défile jamais : s'il y a trop de pictos, ◀ ▶ en bas changent de page. Le bouton ← revient en arrière (sous-dossiers).",
+                    "Phrases rapides (colonne de droite, éclair ⚡) : oui, non, bonjour, merci, toilettes… dites tout de suite, sans passer par la phrase.",
                     "Cadenas (petit, gris, en haut à droite) : à maintenir 2 secondes pour ouvrir le mode adulte."
                 )
             ),
-            HelpTip("À droite de la barre de phrase, la loupe 🔍 cherche un mot et peut montrer où il se trouve ; le clavier ⌨ permet d'écrire un mot qui n'a pas de picto.")
+            HelpTip("À droite de la barre de phrase, la loupe 🔍 cherche un mot et peut montrer où il se trouve ; le clavier ⌨ permet d'écrire un mot qui n'a pas de picto."),
+            HelpTip(
+                "Bien organiser : un mot = une seule place (l'enfant mémorise le geste). Gardez 6 à 8 grands dossiers et rangez le reste en sous-dossiers. " +
+                "Mode adulte › ⋮ › « Disposition recommandée » installe un point de départ, à adapter avec l'orthophoniste.",
+                isNew = true
+            )
         )
     ),
     HelpTopic(
@@ -1528,18 +1535,18 @@ private val helpTopics = listOf(
                 "Ouvrir le mode adulte", listOf(
                     "Maintiens le petit cadenas gris (en haut à droite) pendant 2 secondes : un anneau se remplit. Un simple appui ne fait rien, pour que l'enfant ne l'ouvre pas par hasard.",
                     "Résous le petit calcul (par exemple 3 + 4).",
-                    "Une barre jaune « Mode adulte » apparaît en haut de l'écran, avec tous les outils. Les boutons + apparaissent au bas des colonnes."
+                    "Une barre jaune « Mode adulte » apparaît en haut de l'écran, avec tous les outils."
                 )
             ),
             HelpRows(
                 "La barre du mode adulte", listOf(
-                    "Ajouter" to "créer un picto dans la grille",
+                    "Ajouter" to "créer un picto : dans la grille, la colonne des dossiers ou les phrases rapides",
                     "Édition" to "modifier les pictos (un crayon apparaît) ; le bouton reste foncé tant que l'édition est active",
                     "Paramètres" to "couleurs, voix, réglages tactiles",
                     "Statistiques" to "suivi de l'utilisation",
                     "Aide" to "cette aide",
                     "− 4 par rangée +" to "taille de la grille, de 1 à 8 pictos par rangée",
-                    "⋮" to "calibrer le tactile, mode Kiosque, partager / restaurer la sauvegarde",
+                    "⋮" to "calibrer le tactile, mode Kiosque, partager / restaurer la sauvegarde, disposition recommandée",
                     "Verrouiller" to "referme le mode adulte (l'édition s'arrête aussi)"
                 )
             ),
@@ -1560,7 +1567,7 @@ private val helpTopics = listOf(
         blocks = listOf(
             HelpSteps(
                 "Ajouter un picto", listOf(
-                    "Barre du mode adulte › Ajouter, ou le bouton + au bas d'une colonne.",
+                    "Barre du mode adulte › Ajouter, puis choisis la zone : grille (ou dossier ouvert), colonne des dossiers ou phrases rapides.",
                     "Choisis un texte, une image (recherche ARASAAC ou photo de la galerie) et une couleur.",
                     "Touche « Créer »."
                 )
@@ -1835,8 +1842,8 @@ private fun ScreenMap() {
                     Zone("Barre de phrase", 0xFFFFFFFF, Modifier.weight(1f).fillMaxHeight())
                 }
                 Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Zone("Mots\nessentiels", 0xFFE0E0E0, Modifier.width(90.dp).fillMaxHeight())
-                    Zone("Grille et dossiers", 0xFFC8E6C9, Modifier.weight(1f).fillMaxHeight())
+                    Zone("🏠 Accueil\n+ dossiers", 0xFFE0E0E0, Modifier.width(90.dp).fillMaxHeight())
+                    Zone("Grille : mots essentiels", 0xFFC8E6C9, Modifier.weight(1f).fillMaxHeight())
                 }
             }
             Column(modifier = Modifier.width(110.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

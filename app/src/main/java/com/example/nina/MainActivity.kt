@@ -166,15 +166,42 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     // Chaque dossier, et chaque nouvelle taille de grille, repart de la première page
                     LaunchedEffect(stackSize, columnCount) { gridPage = 0 }
 
+                    // Colonnes latérales paginées (dossiers à gauche, phrases rapides à droite)
+                    var leftPage by remember { mutableIntStateOf(0) }
+                    var leftLayout by remember { mutableStateOf(GridLayout(1, 1, 1)) }
+                    var leftPreviousRect by remember { mutableStateOf(Rect.Zero) }
+                    var leftNextRect by remember { mutableStateOf(Rect.Zero) }
+                    var rightPage by remember { mutableIntStateOf(0) }
+                    var rightLayout by remember { mutableStateOf(GridLayout(1, 1, 1)) }
+                    var rightPreviousRect by remember { mutableStateOf(Rect.Zero) }
+                    var rightNextRect by remember { mutableStateOf(Rect.Zero) }
+
+                    // Cherche les images ARASAAC des pictos marqués "FETCH", puis enregistre leurs adresses :
+                    // sans cela, elles étaient recherchées à chaque démarrage et restaient vides sans réseau
+                    suspend fun fetchAndSaveImages() {
+                        withContext(Dispatchers.IO) { updateCellsWithImages(boutons, coreWords, quickFires) }
+                        saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
+                    }
+
+                    // Disposition recommandée : confirmation, et sauvegarde de l'ancienne disposition pour pouvoir revenir en arrière
+                    val prefs = context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE)
+                    var showRecommendedDialog by remember { mutableStateOf(false) }
+                    var hasPreviousLayout by remember { mutableStateOf(prefs.contains("layout_before_recommended")) }
+                    val applyLayout: (NinaBackup) -> Unit = { layout ->
+                        navigationStack.clear()
+                        boutons.clear(); boutons.addAll(layout.buttons)
+                        coreWords.clear(); coreWords.addAll(layout.coreWords.orEmpty())
+                        quickFires.clear(); quickFires.addAll(layout.quickFires.orEmpty())
+                        saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
+                        gridPage = 0; leftPage = 0; rightPage = 0
+                        // Les nouveaux pictos vont chercher leur image ARASAAC
+                        scope.launch { fetchAndSaveImages() }
+                    }
+
                     // --- LOGIQUE D'INITIALISATION ---
                     
                     // --- RÉCUPÉRATION DES IMAGES MANQUANTES (Pictos ARASAAC) ---
-                    LaunchedEffect(Unit) {
-                        withContext(Dispatchers.IO) {
-                            // Mise à jour asynchrone pour les boutons qui ont le flag "FETCH"
-                            updateCellsWithImages(boutons, coreWords, quickFires)
-                        }
-                    }
+                    LaunchedEffect(Unit) { fetchAndSaveImages() }
 
                     // --- GESTION DU FICHIER DE SAUVEGARDE ---
                     val openDocLauncher =
@@ -195,22 +222,32 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             }
                         }
 
-                    // Pendant un glisser-déposer : rester 0,7 s sur ◀ ou ▶ tourne la page (pour déplacer un picto vers une autre page)
+                    // Pendant un glisser-déposer : rester 0,7 s sur un bouton de page (◀ ▶ de la grille, ▲ ▼ des colonnes)
+                    // tourne la page, pour déplacer un picto vers une autre page
                     LaunchedEffect(dndState.isDragging) {
-                        var hoverDirection = 0
+                        var hovered: Pair<String, Int>? = null
                         var hoverStart = 0L
                         while (dndState.isDragging) {
                             val position = dndState.dragOffset
-                            val direction = when {
-                                nextPageRect.contains(position) -> 1
-                                previousPageRect.contains(position) -> -1
-                                else -> 0
+                            val target = when {
+                                nextPageRect.contains(position) -> "grid" to 1
+                                previousPageRect.contains(position) -> "grid" to -1
+                                leftNextRect.contains(position) -> "left" to 1
+                                leftPreviousRect.contains(position) -> "left" to -1
+                                rightNextRect.contains(position) -> "right" to 1
+                                rightPreviousRect.contains(position) -> "right" to -1
+                                else -> null
                             }
                             val now = System.currentTimeMillis()
-                            if (direction != hoverDirection) {
-                                hoverDirection = direction; hoverStart = now
-                            } else if (direction != 0 && now - hoverStart > 700) {
-                                gridPage = (gridPage + direction).coerceIn(0, gridLayout.pageCount - 1)
+                            if (target != hovered) {
+                                hovered = target; hoverStart = now
+                            } else if (target != null && now - hoverStart > 700) {
+                                val (zone, direction) = target
+                                when (zone) {
+                                    "grid" -> gridPage = (gridPage + direction).coerceIn(0, gridLayout.pageCount - 1)
+                                    "left" -> leftPage = (leftPage + direction).coerceIn(0, leftLayout.pageCount - 1)
+                                    "right" -> rightPage = (rightPage + direction).coerceIn(0, rightLayout.pageCount - 1)
+                                }
                                 hoverStart = now
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             }
@@ -345,7 +382,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     columnCount = it
                                     context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit().putInt("column_count", it).apply()
                                 },
-                                onAdd = { showAddDialog = true },
+                                onAddToGrid = { showAddDialog = true },
+                                onAddToLeft = { isAddingToCore = true; showAddDialog = true },
+                                onAddToQuick = { isAddingToQuickFires = true; showAddDialog = true },
                                 onSettings = { showSettingsDialog = true },
                                 onStats = { showStatsDialog = true },
                                 onHelp = { showHelpDialog = true },
@@ -359,6 +398,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                 },
                                 onBackup = { shareBackupFile(context, NinaBackup(boutons, coreWords, quickFires)) },
                                 onRestore = { openDocLauncher.launch(arrayOf("application/json")) },
+                                onRecommendedLayout = { showRecommendedDialog = true },
+                                onRestorePreviousLayout = if (!hasPreviousLayout) null else ({
+                                    prefs.getString("layout_before_recommended", null)?.let { json ->
+                                        try { applyLayout(parseBackup(json)) } catch (e: Exception) { Log.e("Nina-Debug", "Ancienne disposition illisible", e) }
+                                    }
+                                    prefs.edit().remove("layout_before_recommended").apply()
+                                    hasPreviousLayout = false
+                                }),
                                 onLock = { isAdminMode = false; isEditMode = false }, // On coupe l'édition au verrouillage
                                 modifier = Modifier.zIndex(1f) // Par-dessus la barre de phrase : la grille ne change pas de taille
                             )
@@ -425,9 +472,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                         }
                                     }
 
-                                    // Bouton Retour : Navigation dans les dossiers
+                                    // Bouton Retour : seulement dans un sous-dossier (au premier niveau, 🏠 Accueil suffit)
                                     Box(modifier = Modifier.width(80.dp)) {
-                                        if (navigationStack.isNotEmpty()) {
+                                        if (navigationStack.size > 1) {
                                             IconButton(
                                                 onClick = {
                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -465,62 +512,90 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     }
                                 }
 
-                                // Ouvre la page où se trouve la case à toucher
-                                LaunchedEffect(guidedId, stackSize, gridLayout.perPage) {
+                                // Ouvre la page où se trouve la case à toucher (grille ou colonnes)
+                                LaunchedEffect(guidedId, stackSize, gridLayout.perPage, leftLayout.perPage, rightLayout.perPage) {
                                     val index = currentButtons.indexOfFirst { it.id == guidedId }
                                     if (index >= 0) gridPage = index / gridLayout.perPage
+                                    val leftIndex = coreWords.indexOfFirst { it.id == guidedId }
+                                    if (leftIndex >= 0) leftPage = leftIndex / leftLayout.perPage
+                                    val rightIndex = quickFires.indexOfFirst { it.id == guidedId }
+                                    if (rightIndex >= 0) rightPage = rightIndex / rightLayout.perPage
                                 }
 
                                 // --- ZONE DE CONTENU PRINCIPALE ---
                                 Row(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                                     
-                                    // A. SIDEBAR GAUCHE (Core Words / Raccourcis)
+                                    // A. COLONNE DE GAUCHE : 🏠 Accueil (fixe) puis les dossiers, sans défilement (pages ▲ ▼ si besoin)
                                     Column(
                                         modifier = Modifier
                                             .width(120.dp)
                                             .fillMaxHeight()
-                                            .onGloballyPositioned { sidebarRect = it.boundsInRoot() }
-                                            .background(Color(0xFFF5F5F5), RoundedCornerShape(16.dp))
-                                            .verticalScroll(rememberScrollState(), enabled = !dndState.isDragging)
-                                            .padding(bottom = 16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                                            .padding(bottom = 16.dp)
+                                            .onGloballyPositioned { sidebarRect = it.boundsInRoot() },
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        coreWords.forEach { cell ->
-                                            var posInRoot by remember { mutableStateOf(Offset.Zero) }
-                                            DraggableCellWrapper(cell = cell) {
-                                                Box(modifier = Modifier.onGloballyPositioned { posInRoot = it.positionInRoot() }) {
-                                                    AACCellView(
-                                                        cell = cell, haptic = haptic, debounceTime = debounceTime,
-                                                        isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode, isGuided = cell.id == guidedId,
-                                                        onClick = {
-                                                            if (isEditMode) {
-                                                                cellToEdit = cell
-                                                                showEditDialog = true
-                                                            } else {
-                                                                playCellAudio(cell, voicePitch, voiceRate)
-                                                                trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
-                                                                if (!cell.isQuickPhrase) phrase.add(cell)
+                                        HomeCell(
+                                            isHome = navigationStack.isEmpty(),
+                                            isGuided = false,
+                                            onClick = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                navigationStack.clear()
+                                            },
+                                            modifier = Modifier.fillMaxWidth().height(80.dp)
+                                        )
+                                        val leftItemCount = coreWords.size // Pas de case « + » : la colonne reste identique en mode enfant et adulte
+                                        PagedColumn(
+                                            itemCount = leftItemCount,
+                                            page = leftPage,
+                                            onPageChange = { leftPage = it },
+                                            onLayout = { if (it != leftLayout) leftLayout = it },
+                                            onPagerBounds = { previous, next -> leftPreviousRect = previous; leftNextRect = next },
+                                            modifier = Modifier.weight(1f).fillMaxWidth()
+                                        ) { index, slotModifier ->
+                                            val cell = coreWords[index]
+                                            run {
+                                                var posInRoot by remember { mutableStateOf(Offset.Zero) }
+                                                // Le dossier ouvert (premier niveau) est encadré : l'enfant voit où il se trouve
+                                                val isOpen = cell.isFolder && navigationStack.firstOrNull()?.id == cell.id
+                                                DraggableCellWrapper(cell = cell, modifier = slotModifier) {
+                                                    Box(modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .then(if (isOpen) Modifier.border(4.dp, Color(0xFF4A5D91), RoundedCornerShape(22.dp)).padding(4.dp) else Modifier)
+                                                        .onGloballyPositioned { posInRoot = it.positionInRoot() }
+                                                    ) {
+                                                        AACCellView(
+                                                            cell = cell, haptic = haptic, debounceTime = debounceTime,
+                                                            isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode, isGuided = cell.id == guidedId,
+                                                            modifier = Modifier.fillMaxSize(),
+                                                            onClick = {
+                                                                if (isEditMode) {
+                                                                    cellToEdit = cell
+                                                                    showEditDialog = true
+                                                                } else if (cell.isFolder) {
+                                                                    // Un dossier de la colonne s'ouvre depuis n'importe où
+                                                                    playCellAudio(cell, voicePitch, voiceRate)
+                                                                    advanceGuide(cell)
+                                                                    navigationStack.clear()
+                                                                    navigationStack.add(cell)
+                                                                } else {
+                                                                    playCellAudio(cell, voicePitch, voiceRate)
+                                                                    trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
+                                                                    if (!cell.isQuickPhrase) phrase.add(cell)
+                                                                }
+                                                            },
+                                                            onLongClick = {
+                                                                if (isAdminMode) {
+                                                                    dndState.draggedCell = cell
+                                                                    dndState.dragOffset = posInRoot
+                                                                    dndState.isDragging = true
+                                                                } else {
+                                                                    openWordForms(cell, false) // false : picto de la colonne
+                                                                }
                                                             }
-                                                        },
-                                                        onLongClick = {
-                                                            if (isAdminMode) {
-                                                                dndState.draggedCell = cell
-                                                                dndState.dragOffset = posInRoot
-                                                                dndState.isDragging = true
-                                                            } else {
-                                                                openWordForms(cell, false) // false : picto des Core Words
-                                                            }
-                                                        }
-                                                    )
+                                                        )
+                                                    }
                                                 }
                                             }
-                                        }
-
-                                        if (isAdminMode) {
-                                            IconButton(
-                                                onClick = { isAddingToCore = true; showAddDialog = true },
-                                                modifier = Modifier.fillMaxWidth().aspectRatio(1f).background(Color.White.copy(alpha = 0.5f), RoundedCornerShape(24.dp)).border(2.dp, Color.Gray, RoundedCornerShape(24.dp))
-                                            ) { Icon(Icons.Default.Add, contentDescription = null, tint = Color.Gray) }
                                         }
                                     }
 
@@ -616,22 +691,27 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-                                // Zone Quick Fires (Phrases rapides)
-                                Column(
+                                // Zone Quick Fires (Phrases rapides) : sans défilement, pages ▲ ▼ si besoin
+                                PagedColumn(
+                                    itemCount = quickFires.size,
+                                    page = rightPage,
+                                    onPageChange = { rightPage = it },
+                                    onLayout = { if (it != rightLayout) rightLayout = it },
+                                    onPagerBounds = { previous, next -> rightPreviousRect = previous; rightNextRect = next },
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
                                         .onGloballyPositioned { quickFiresRect = it.boundsInRoot() }
-                                        .verticalScroll(rememberScrollState(), enabled = !dndState.isDragging),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    quickFires.forEach { cell ->
+                                ) { index, slotModifier ->
+                                    val cell = quickFires[index]
+                                    run {
                                         var posInRoot by remember { mutableStateOf(Offset.Zero) }
-                                        DraggableCellWrapper(cell = cell) {
-                                            Box(modifier = Modifier.onGloballyPositioned { posInRoot = it.positionInRoot() }) {
+                                        DraggableCellWrapper(cell = cell, modifier = slotModifier) {
+                                            Box(modifier = Modifier.fillMaxSize().onGloballyPositioned { posInRoot = it.positionInRoot() }) {
                                                 AACCellView(
                                                     cell = cell, haptic = haptic, debounceTime = debounceTime,
                                                     isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode, isGuided = cell.id == guidedId,
+                                                    modifier = Modifier.fillMaxSize(),
                                                     onClick = {
                                                         if (isEditMode) {
                                                             cellToEdit = cell
@@ -652,17 +732,34 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             }
                                         }
                                     }
-
-                                    if (isAdminMode) {
-                                        IconButton(
-                                            onClick = { isAddingToQuickFires = true; showAddDialog = true },
-                                            modifier = Modifier.fillMaxWidth().aspectRatio(1f).background(Color.White.copy(alpha = 0.5f), RoundedCornerShape(24.dp)).border(2.dp, Color.Gray, RoundedCornerShape(24.dp))
-                                        ) { Icon(Icons.Default.Add, contentDescription = null, tint = Color.Gray) }
-                                    }
                                 }
                             }
                         }
                         }
+                    }
+
+                    if (showRecommendedDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showRecommendedDialog = false },
+                            title = { Text("Disposition recommandée", fontWeight = FontWeight.Bold) },
+                            text = {
+                                Text(
+                                    "La grille d'accueil reçoit les mots essentiels (moi, vouloir, encore, pas…), " +
+                                    "la colonne de gauche les dossiers sous 🏠 Accueil, la colonne de droite oui, non, bonjour, merci et toilettes.\n\n" +
+                                    "Tous les pictos actuels sont remplacés. L'ancienne disposition est gardée : " +
+                                    "⋮ › « Revenir à la disposition précédente » la remet en place."
+                                )
+                            },
+                            confirmButton = {
+                                Button(onClick = {
+                                    prefs.edit().putString("layout_before_recommended", GsonInstance.gson.toJson(NinaBackup(boutons.toList(), coreWords.toList(), quickFires.toList()))).apply()
+                                    hasPreviousLayout = true
+                                    applyLayout(recommendedLayout())
+                                    showRecommendedDialog = false
+                                }) { Text("Appliquer") }
+                            },
+                            dismissButton = { TextButton(onClick = { showRecommendedDialog = false }) { Text("Annuler") } }
+                        )
                     }
 
                     wordFormsCell?.let { baseCell ->
@@ -852,40 +949,50 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         tts?.shutdown(); super.onDestroy()
     }
 
-    // --- PACK DE DÉMARRAGE ET PAR DÉFAUT ---
+    // --- PACK DE DÉMARRAGE ET DISPOSITION RECOMMANDÉE ---
 
-    private fun getDefaultCoreWords() = listOf(
-        AACCell("Vouloir", 0xFFC8E6C9L, "FETCH"),
-        AACCell("Aider", 0xFFC8E6C9L, "FETCH"),
-        AACCell("Encore", 0xFFF8BBD0L, "FETCH"),
-        AACCell("Fini", 0xFFF8BBD0L, "FETCH"),
-        AACCell("Toilettes", 0xFFE1BEE7L, "FETCH")
-    )
+    private fun getDefaultCoreWords() = recommendedLayout().coreWords.orEmpty()
+    private fun getDefaultQuickFires() = recommendedLayout().quickFires.orEmpty()
+    private fun getStarterPack(): List<AACCell> = recommendedLayout().buttons
 
-    private fun getDefaultQuickFires() = listOf(
-        AACCell("Bonjour", 0xFFFFF9C4L, "FETCH", isQuickPhrase = true),
-        AACCell("Oui", 0xFFC8E6C9L, "FETCH", isQuickPhrase = true),
-        AACCell("Non", 0xFFFFCDD2L, "FETCH", isQuickPhrase = true),
-        AACCell("Merci", 0xFFBBDEFBL, "FETCH", isQuickPhrase = true)
-    )
-
-    private fun getStarterPack(): List<AACCell> {
+    /**
+     * Disposition recommandée (principe « Core First » de TD Snap) : un mot = une seule place.
+     * - Grille d'accueil : les mots essentiels, à positions fixes. À 4 pictos par rangée, chaque colonne
+     *   suit le code couleur et l'ordre de la phrase : qui (jaune) → action (vert) → encore/fini → petits mots.
+     * - Colonne de gauche : les dossiers (catégories), sous la case 🏠 Accueil.
+     * - Colonne de droite : le social et l'urgent, dits tout de suite.
+     * C'est un point de départ, à adapter avec l'orthophoniste.
+     */
+    private fun recommendedLayout(): NinaBackup {
         val colPersonne = 0xFFFFF9C4L; val colAction = 0xFFC8E6C9L; val colObjet = 0xFFFFCC80L
         val colDesc = 0xFFBBDEFBL; val colSocial = 0xFFF8BBD0L; val colLieu = 0xFFE1BEE7L
+        val colPetitMot = 0xFFEEEEEEL
 
-        return listOf(
-            AACCell("Moi", colPersonne, "FETCH"), AACCell("Toi", colPersonne, "FETCH"),
-            AACCell("Vouloir", colAction, "FETCH"), AACCell("Aller", colAction, "FETCH"),
-            AACCell("Encore", colSocial, "FETCH"), AACCell("Fini", colSocial, "FETCH"),
-            AACCell("Aider", colAction, "FETCH"), AACCell("Avec", colSocial, "FETCH"),
-            AACCell("Oui", colSocial, "FETCH"), AACCell("Non", colSocial, "FETCH"),
-            AACCell("Actions", colAction, "FETCH", isFolder = true, content = mutableStateListOf(AACCell("Manger", colAction, "FETCH"), AACCell("Boire", colAction, "FETCH"))),
-            AACCell("Nourriture", colObjet, "FETCH", isFolder = true, content = mutableStateListOf(AACCell("Eau", colObjet, "FETCH"), AACCell("Gâteau", colObjet, "FETCH"))),
-            AACCell("Personnes", colPersonne, "FETCH", isFolder = true, content = mutableStateListOf(AACCell("Maman", colPersonne, "FETCH"), AACCell("Papa", colPersonne, "FETCH"))),
-            AACCell("Émotions", colDesc, "FETCH", isFolder = true, content = mutableStateListOf(AACCell("Content", colDesc, "FETCH"), AACCell("Triste", colDesc, "FETCH"))),
-            AACCell("Lieux", colLieu, "FETCH", isFolder = true, content = mutableStateListOf(AACCell("Maison", colLieu, "FETCH"), AACCell("École", colLieu, "FETCH"))),
-            AACCell("Bonjour", colSocial, "FETCH")
+        fun word(label: String, color: Long) = AACCell(label, color, "FETCH")
+        // Mots ambigus : la recherche ARASAAC donnerait un pied pour « pas » et du calcium pour « ça »
+        fun arasaac(label: String, color: Long, id: Int) = AACCell(label, color, "https://static.arasaac.org/pictograms/$id/${id}_300.png")
+        fun folder(label: String, color: Long, vararg words: AACCell) =
+            AACCell(label, color, "FETCH", isFolder = true, content = mutableStateListOf(*words))
+        fun quick(label: String, color: Long, spoken: String? = null) =
+            AACCell(label, color, "FETCH", isQuickPhrase = true, spokenText = spoken)
+
+        val grid = listOf(
+            word("Moi", colPersonne), word("Vouloir", colAction), word("Encore", colSocial), word("Avec", colPetitMot),
+            word("Toi", colPersonne), word("Aller", colAction), word("Fini", colSocial), arasaac("Pas", colPetitMot, 5525),
+            word("Lui", colPersonne), word("Aider", colAction), arasaac("Ça", colPetitMot, 7091), word("Ici", colPetitMot)
         )
+        val folders = listOf(
+            folder("Actions", colAction, word("Manger", colAction), word("Boire", colAction)),
+            folder("Nourriture", colObjet, word("Eau", colObjet), word("Gâteau", colObjet)),
+            folder("Personnes", colPersonne, word("Maman", colPersonne), word("Papa", colPersonne)),
+            folder("Émotions", colDesc, word("Content", colDesc), word("Triste", colDesc)),
+            folder("Lieux", colLieu, word("Maison", colLieu), word("École", colLieu))
+        )
+        val quickPhrases = listOf(
+            quick("Oui", colAction), quick("Non", 0xFFFFCDD2L), quick("Bonjour", colPersonne), quick("Merci", colDesc),
+            quick("Toilettes", colLieu, "J'ai besoin d'aller aux toilettes")
+        )
+        return NinaBackup(grid, folders, quickPhrases)
     }
 }
 
@@ -955,9 +1062,11 @@ fun AdminToolbar(
     showMore: Boolean, onMoreToggle: (Boolean) -> Unit,
     isEditMode: Boolean, onEditModeToggle: (Boolean) -> Unit,
     columnCount: Int, onColumnCountChange: (Int) -> Unit,
-    onAdd: () -> Unit, onSettings: () -> Unit, onStats: () -> Unit, onHelp: () -> Unit,
+    onAddToGrid: () -> Unit, onAddToLeft: () -> Unit, onAddToQuick: () -> Unit, onSettings: () -> Unit, onStats: () -> Unit, onHelp: () -> Unit,
     onCalibration: () -> Unit, isKioskMode: Boolean, onKioskToggle: () -> Unit,
-    onBackup: () -> Unit, onRestore: () -> Unit, onLock: () -> Unit,
+    onBackup: () -> Unit, onRestore: () -> Unit,
+    onRecommendedLayout: () -> Unit, onRestorePreviousLayout: (() -> Unit)?, // null : rien à restaurer
+    onLock: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val accent = Color(0xFF4A5D91)
@@ -973,7 +1082,16 @@ fun AdminToolbar(
         Icon(Icons.Default.LockOpen, contentDescription = null, tint = Color(0xFF8D6E00))
         Text("Mode adulte", fontWeight = FontWeight.Bold, color = Color(0xFF5D4600), modifier = Modifier.padding(end = 8.dp))
 
-        AdminToolButton(Icons.Default.Add, "Ajouter", onAdd)
+        // Ajouter : on choisit la zone (les colonnes n'ont pas de case « + » pour ne pas changer de disposition)
+        Box {
+            var showAddMenu by remember { mutableStateOf(false) }
+            AdminToolButton(Icons.Default.Add, "Ajouter", { showAddMenu = true })
+            DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
+                DropdownMenuItem(text = { Text("Dans la grille (dossier ouvert)") }, onClick = { showAddMenu = false; onAddToGrid() })
+                DropdownMenuItem(text = { Text("Dans la colonne de gauche (dossiers)") }, onClick = { showAddMenu = false; onAddToLeft() })
+                DropdownMenuItem(text = { Text("Dans les phrases rapides") }, onClick = { showAddMenu = false; onAddToQuick() })
+            }
+        }
         AdminToolButton(Icons.Default.Edit, if (isEditMode) "Édition : oui" else "Édition", { onEditModeToggle(!isEditMode) }, selected = isEditMode)
         AdminToolButton(Icons.Default.Settings, "Paramètres", onSettings)
         AdminToolButton(Icons.Default.BarChart, "Statistiques", onStats)
@@ -1004,6 +1122,11 @@ fun AdminToolbar(
                 HorizontalDivider()
                 DropdownMenuItem(text = { Text("📤 Partager / Sauvegarder") }, onClick = { onMoreToggle(false); onBackup() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.btn_restore)) }, onClick = { onMoreToggle(false); onRestore() })
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("🧩 Disposition recommandée…") }, onClick = { onMoreToggle(false); onRecommendedLayout() })
+                onRestorePreviousLayout?.let { restore ->
+                    DropdownMenuItem(text = { Text("↩ Revenir à la disposition précédente") }, onClick = { onMoreToggle(false); restore() })
+                }
             }
         }
 
@@ -1050,7 +1173,7 @@ fun DialogManager(
     if (showCalibration) CalibrationTest(onFinished = onCalibrationFinished)
     if (showWordFinder) WordFinderDialog(allButtons = allButtons, coreWords = coreWords, quickFires = quickFires, onShow = onWordFinderShow, onDismiss = onWordFinderDismiss)
     if (showStats) StatsDialog(stats = usageStats, onDismiss = onStatsDismiss, onReset = onStatsReset)
-    if (showEditDialog && cellToEdit != null) EditDialog(cellToEdit, allButtons, onDelete = onEditDelete, onSave = onEditSave, onDismiss = onEditDismiss)
+    if (showEditDialog && cellToEdit != null) EditDialog(cellToEdit, allFolders(allButtons, coreWords), onDelete = onEditDelete, onSave = onEditSave, onDismiss = onEditDismiss)
 }
 
 // Fonctions privées de logique

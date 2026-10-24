@@ -24,6 +24,9 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.draw.alpha
@@ -370,6 +373,107 @@ private fun PageButton(forward: Boolean, enabled: Boolean, modifier: Modifier, o
             contentDescription = if (forward) "Page suivante" else "Page précédente",
             modifier = Modifier.size(36.dp)
         )
+    }
+}
+
+/**
+ * Combien de cases tiennent dans une colonne latérale de hauteur `height` (dp),
+ * chaque case faisant au moins `minItemHeight`. Au-delà, on passe en pages ▲ ▼.
+ * Fonction pure (testée sans Android).
+ */
+fun computeColumnLayout(itemCount: Int, height: Float, minItemHeight: Float, gap: Float, pagerHeight: Float): GridLayout {
+    fun rowsFor(h: Float) = ((h + gap) / (minItemHeight + gap)).toInt().coerceAtLeast(1)
+    val rowsAlone = rowsFor(height)
+    if (itemCount <= rowsAlone) return GridLayout(rowsAlone, rowsAlone, 1)
+    val rows = rowsFor(height - pagerHeight - gap)
+    return GridLayout(rows, rows, (itemCount + rows - 1) / rows)
+}
+
+/**
+ * Colonne latérale sans défilement (dossiers à gauche, phrases rapides à droite) :
+ * les cases se partagent la hauteur ; s'il y en a trop, des boutons ▲ ▼ changent de page.
+ * Les places vides gardent leur taille pour que les cases ne bougent pas.
+ */
+@Composable
+fun PagedColumn(
+    itemCount: Int,
+    page: Int,
+    onPageChange: (Int) -> Unit,
+    onLayout: (GridLayout) -> Unit,
+    onPagerBounds: (previous: Rect, next: Rect) -> Unit,
+    modifier: Modifier = Modifier,
+    minItemHeight: Dp = 80.dp,
+    gap: Dp = 12.dp,
+    item: @Composable (index: Int, modifier: Modifier) -> Unit
+) {
+    val pagerHeight = 52.dp
+    BoxWithConstraints(modifier = modifier) {
+        val layout = computeColumnLayout(itemCount, maxHeight.value, minItemHeight.value, gap.value, pagerHeight.value)
+        SideEffect { onLayout(layout) }
+        val currentPage = page.coerceIn(0, layout.pageCount - 1)
+        if (currentPage != page) SideEffect { onPageChange(currentPage) }
+
+        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
+            repeat(layout.rows) { row ->
+                val index = currentPage * layout.perPage + row
+                if (index < itemCount) key(index) { item(index, Modifier.weight(1f).fillMaxWidth()) }
+                else Spacer(modifier = Modifier.weight(1f))
+            }
+            if (layout.pageCount > 1) {
+                var previousBounds by remember { mutableStateOf(Rect.Zero) }
+                var nextBounds by remember { mutableStateOf(Rect.Zero) }
+                DisposableEffect(Unit) { onDispose { onPagerBounds(Rect.Zero, Rect.Zero) } }
+                SideEffect { onPagerBounds(previousBounds, nextBounds) }
+                Row(modifier = Modifier.fillMaxWidth().height(pagerHeight), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ColumnPageButton(up = true, enabled = currentPage > 0,
+                        modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { previousBounds = it.boundsInRoot() }
+                    ) { onPageChange(currentPage - 1) }
+                    ColumnPageButton(up = false, enabled = currentPage < layout.pageCount - 1,
+                        modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { nextBounds = it.boundsInRoot() }
+                    ) { onPageChange(currentPage + 1) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColumnPageButton(up: Boolean, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Button(
+        onClick = onClick, enabled = enabled, modifier = modifier,
+        shape = RoundedCornerShape(14.dp), contentPadding = PaddingValues(0.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A5D91), disabledContainerColor = Color(0xFFE6E6EE))
+    ) {
+        Icon(
+            if (up) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+            contentDescription = if (up) "Dossiers précédents" else "Dossiers suivants",
+            modifier = Modifier.size(32.dp)
+        )
+    }
+}
+
+/**
+ * Case 🏠 Accueil, toujours en haut de la colonne des dossiers : un toucher ramène à la grille d'accueil.
+ * Elle est mise en évidence quand on est déjà à l'accueil.
+ */
+@Composable
+fun HomeCell(isHome: Boolean, isGuided: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val accent = Color(0xFF4A5D91)
+    Card(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = if (isHome) accent else Color.White),
+        border = BorderStroke(if (isGuided) 6.dp else 2.dp, if (isGuided) Color(0xFFFF6D00) else accent)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Default.Home, contentDescription = null, tint = if (isHome) Color.White else accent, modifier = Modifier.size(36.dp))
+            Text("ACCUEIL", fontWeight = FontWeight.Black, fontSize = 13.sp, color = if (isHome) Color.White else accent)
+        }
     }
 }
 

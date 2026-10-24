@@ -21,6 +21,18 @@ class WordGuideTest {
     }
 
     @Test
+    fun foldersInLeftColumn_giveFolderThenWord() {
+        val guide = findWordGuides("eau", emptyList(), listOf(nourriture), emptyList()).single()
+        assertEquals(listOf("Nourriture", "Boissons", "Eau"), guide.steps.map { it.label })
+        assertEquals("Colonne de gauche > Nourriture > Boissons", guide.place)
+    }
+
+    @Test
+    fun allFolders_includesSubFolders() {
+        assertEquals(listOf("Nourriture", "Boissons"), allFolders(buttons).map { it.label })
+    }
+
+    @Test
     fun searchesSidebars_andSkipsHidden() {
         val core = listOf(AACCell("Vouloir", 0L))
         val guides = findWordGuides("vou", buttons, core, emptyList())
