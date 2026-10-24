@@ -1321,11 +1321,14 @@ fun CalibrationTest(onFinished: (Float, Float) -> Unit) {
 @Composable
 fun WordFinderDialog(
     allButtons: List<AACCell>,
+    coreWords: List<AACCell>,
+    quickFires: List<AACCell>,
+    onShow: (WordGuide) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    val searchResults = remember(searchQuery, allButtons) {
-        findWordPaths(searchQuery, allButtons)
+    val searchResults = remember(searchQuery, allButtons, coreWords, quickFires) {
+        findWordGuides(searchQuery, allButtons, coreWords, quickFires)
     }
 
     AlertDialog(
@@ -1359,8 +1362,10 @@ fun WordFinderDialog(
                         if (searchResults.isEmpty()) {
                             item { Text("Aucun mot trouvé.", color = Color.Gray) }
                         } else {
-                            items(searchResults) { (cell, path) ->
+                            items(searchResults) { guide ->
+                                val cell = guide.cell
                                 Card(
+                                    onClick = { onShow(guide) },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = CardDefaults.cardColors(containerColor = Color.White),
                                     elevation = CardDefaults.cardElevation(2.dp)
@@ -1376,9 +1381,15 @@ fun WordFinderDialog(
                                                 .size(40.dp)
                                                 .clip(RoundedCornerShape(8.dp))
                                         )
-                                        Column(modifier = Modifier.padding(start = 12.dp)) {
+                                        Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
                                             Text(cell.label.uppercase(), fontWeight = FontWeight.Bold)
-                                            Text(path, fontSize = 12.sp, color = Color.Gray)
+                                            Text(guide.place, fontSize = 12.sp, color = Color.Gray)
+                                        }
+                                        // Montre le chemin sur la grille, case par case (comme "Find Word" de TD Snap)
+                                        FilledTonalButton(onClick = { onShow(guide) }) {
+                                            Icon(Icons.Default.TouchApp, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Montrer")
                                         }
                                     }
                                 }

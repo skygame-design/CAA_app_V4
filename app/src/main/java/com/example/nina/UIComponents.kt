@@ -1,7 +1,12 @@
 package com.example.nina
 
 import android.util.Log
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -149,6 +154,7 @@ fun AACCellView(
     isAdminMode: Boolean = false,
     isEditMode: Boolean = false,
     isCviMode: Boolean = false,
+    isGuided: Boolean = false, // Case à toucher pendant la modélisation (chemin vers un mot)
     onClick: () -> Unit = {},
     onLongClick: () -> Unit = {},
 ) {
@@ -197,12 +203,26 @@ fun AACCellView(
         }
     } else Modifier
 
+    // Modélisation : cadre orange qui clignote et case qui "respire" pour montrer où toucher
+    val guideModifier = if (isGuided) {
+        val transition = rememberInfiniteTransition(label = "guide")
+        val pulse by transition.animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+            label = "guidePulse"
+        )
+        Modifier
+            .graphicsLayer(scaleX = 1f + pulse * 0.06f, scaleY = 1f + pulse * 0.06f)
+            .border(6.dp, Color(0xFFFF6D00).copy(alpha = 0.35f + pulse * 0.65f), RoundedCornerShape(16.dp))
+    } else Modifier
+
     Box(
         modifier = Modifier
             .aspectRatio(1f)
             .padding(if (cell.isFolder) 2.dp else 0.dp)
             .alpha(alpha)
             .then(visualFeedbackModifier)
+            .then(guideModifier)
     ) {
         Card(
             modifier = Modifier

@@ -107,20 +107,36 @@ fun saveStats(context: Context, stats: Map<String, Int>) {
 }
 
 /**
- * Recherche récursive du chemin d'un mot dans la structure des boutons.
+ * Un mot trouvé et le chemin pour l'atteindre.
+ * steps : les cases à toucher dans l'ordre (dossiers puis le mot), depuis l'accueil.
+ * place : description lisible ("Accueil > Nourriture", "Colonne de gauche"...).
  */
-fun findWordPaths(query: String, buttons: List<AACCell>, currentPath: String = "Accueil"): List<Pair<AACCell, String>> {
+data class WordGuide(val cell: AACCell, val steps: List<AACCell>, val place: String)
+
+/**
+ * Recherche un mot dans la grille (y compris dans les dossiers) et dans les deux colonnes.
+ * Les pictos masqués, et le contenu des dossiers masqués, sont ignorés : on ne peut pas les montrer.
+ */
+fun findWordGuides(query: String, buttons: List<AACCell>, coreWords: List<AACCell>, quickFires: List<AACCell>): List<WordGuide> {
     if (query.isBlank()) return emptyList()
-    val results = mutableListOf<Pair<AACCell, String>>()
-    
-    for (cell in buttons) {
-        if (cell.label.contains(query, ignoreCase = true)) {
-            results.add(cell to currentPath)
-        }
-        if (cell.isFolder) {
-            results.addAll(findWordPaths(query, cell.content, "$currentPath > ${cell.label}"))
+    val results = mutableListOf<WordGuide>()
+
+    fun searchGrid(cells: List<AACCell>, folders: List<AACCell>) {
+        for (cell in cells) {
+            if (cell.isHidden) continue
+            if (cell.label.contains(query, ignoreCase = true)) {
+                val place = (listOf("Accueil") + folders.map { it.label }).joinToString(" > ")
+                results += WordGuide(cell, folders + cell, place)
+            }
+            if (cell.isFolder) searchGrid(cell.content, folders + cell)
         }
     }
+
+    searchGrid(buttons, emptyList())
+    coreWords.filter { !it.isHidden && it.label.contains(query, ignoreCase = true) }
+        .forEach { results += WordGuide(it, listOf(it), "Colonne de gauche") }
+    quickFires.filter { !it.isHidden && it.label.contains(query, ignoreCase = true) }
+        .forEach { results += WordGuide(it, listOf(it), "Phrases rapides") }
     return results
 }
 

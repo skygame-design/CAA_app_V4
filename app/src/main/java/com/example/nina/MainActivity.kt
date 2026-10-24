@@ -120,6 +120,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
                     var usageStats by remember { mutableStateOf(loadStats(context)) }
 
+                    // Modélisation : cases à toucher dans l'ordre pour atteindre un mot (dossiers puis mot)
+                    var guideSteps by remember { mutableStateOf<List<AACCell>>(emptyList()) }
+                    var guideStep by remember { mutableIntStateOf(0) }
+                    val guideTarget = guideSteps.lastOrNull()
+                    val guidedId = guideSteps.getOrNull(guideStep)?.id
+                    val advanceGuide: (AACCell) -> Unit = { cell ->
+                        if (cell.id == guidedId) {
+                            guideStep++
+                            if (guideStep >= guideSteps.size) { guideSteps = emptyList(); guideStep = 0 }
+                        }
+                    }
+
                     // Formes du mot (appui long hors mode admin) : picto concerné, ses formes, et s'il vient de la grille
                     var wordFormsCell by remember { mutableStateOf<AACCell?>(null) }
                     var wordForms by remember { mutableStateOf<List<WordForm>>(emptyList()) }
@@ -383,6 +395,33 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     }
                                 }
 
+                                // --- BANDEAU DE MODÉLISATION ---
+                                if (guideTarget != null) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                                            .background(Color(0xFFFFF3E0), RoundedCornerShape(16.dp))
+                                            .border(2.dp, Color(0xFFFF6D00), RoundedCornerShape(16.dp))
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.TouchApp, contentDescription = null, tint = Color(0xFFFF6D00))
+                                        Text(
+                                            "Touche la case orange pour dire « ${guideTarget.label} »  (${guideStep + 1}/${guideSteps.size})",
+                                            fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF5D4037),
+                                            modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
+                                        )
+                                        TextButton(onClick = { guideSteps = emptyList(); guideStep = 0 }) { Text("Arrêter") }
+                                    }
+                                }
+
+                                // Fait défiler la grille jusqu'à la case à toucher
+                                LaunchedEffect(guidedId, stackSize) {
+                                    val index = currentButtons.indexOfFirst { it.id == guidedId }
+                                    if (index >= 0) gridState.animateScrollToItem(index)
+                                }
+
                                 // --- ZONE DE CONTENU PRINCIPALE ---
                                 Row(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                                     
@@ -403,14 +442,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                 Box(modifier = Modifier.onGloballyPositioned { posInRoot = it.positionInRoot() }) {
                                                     AACCellView(
                                                         cell = cell, haptic = haptic, debounceTime = debounceTime,
-                                                        isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode,
+                                                        isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode, isGuided = cell.id == guidedId,
                                                         onClick = {
                                                             if (isEditMode) {
                                                                 cellToEdit = cell
                                                                 showEditDialog = true
                                                             } else {
                                                                 playCellAudio(cell, voicePitch, voiceRate)
-                                                                trackWordUsage(cell, context, { usageStats = it })
+                                                                trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
                                                                 if (!cell.isQuickPhrase) phrase.add(cell)
                                                             }
                                                         },
@@ -485,7 +524,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                         }) {
                                                             AACCellView(
                                                                 cell = cell, haptic = haptic, debounceTime = debounceTime,
-                                                                isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode,
+                                                                isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode, isGuided = cell.id == guidedId,
                                                                 onClick = {
                                                                     Log.d("Nina-Debug", "🖱️ Clic Cellule détecté")
                                                                     if (isEditMode) {
@@ -493,7 +532,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                                         showEditDialog = true
                                                                     } else {
                                                                         playCellAudio(cell, voicePitch, voiceRate)
-                                                                        trackWordUsage(cell, context, { usageStats = it })
+                                                                        trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
                                                                         if (cell.isFolder) navigationStack.add(cell)
                                                                         else {
                                                                             if (!cell.isQuickPhrase) phrase.add(cell)
@@ -588,14 +627,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             Box(modifier = Modifier.onGloballyPositioned { posInRoot = it.positionInRoot() }) {
                                                 AACCellView(
                                                     cell = cell, haptic = haptic, debounceTime = debounceTime,
-                                                    isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode,
+                                                    isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode, isGuided = cell.id == guidedId,
                                                     onClick = {
                                                         if (isEditMode) {
                                                             cellToEdit = cell
                                                             showEditDialog = true
                                                         } else {
                                                             playCellAudio(cell, voicePitch, voiceRate)
-                                                            trackWordUsage(cell, context, { usageStats = it })
+                                                            trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
                                                         }
                                                     },
                                                     onLongClick = {
@@ -628,7 +667,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                 // La forme choisie remplace le mot de base dans la phrase, et c'est elle qui est prononcée
                                 phrase.add(baseCell.copy(id = newCellId(), label = form.text, spokenText = null, audioPath = null))
                                 speakText(form.text, voicePitch, voiceRate)
-                                trackWordUsage(baseCell, context, { usageStats = it })
+                                trackWordUsage(baseCell, context, { usageStats = it }); advanceGuide(baseCell)
                                 if (wordFormsFromGrid && autoReturnHome) navigationStack.clear()
                                 wordFormsCell = null
                             },
@@ -663,7 +702,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit().putFloat("offset_x", x).putFloat("offset_y", y).apply()
                             showCalibration = false
                         },
-                        showWordFinder = showWordFinder, onWordFinderDismiss = { showWordFinder = false },
+                        showWordFinder = showWordFinder, coreWords = coreWords, quickFires = quickFires,
+                        onWordFinderShow = { guide ->
+                            // On repart de l'accueil et on montre la première case du chemin
+                            navigationStack.clear()
+                            guideSteps = guide.steps; guideStep = 0
+                            showWordFinder = false
+                        },
+                        onWordFinderDismiss = { showWordFinder = false },
                         showStats = showStatsDialog, usageStats = usageStats, onStatsDismiss = { showStatsDialog = false }, onStatsReset = { usageStats = emptyMap(); saveStats(context, emptyMap()) },
                         showEditDialog = showEditDialog, cellToEdit = cellToEdit, allButtons = boutons,
                         onEditDelete = { targetCell ->
@@ -882,7 +928,7 @@ fun DialogManager(
     onSettingsDismiss: () -> Unit, onSettingsSave: (Long, Float, Float, Long, Boolean, Boolean) -> Unit,
     showHelp: Boolean, onHelpDismiss: () -> Unit,
     showCalibration: Boolean, onCalibrationFinished: (Float, Float) -> Unit,
-    showWordFinder: Boolean, onWordFinderDismiss: () -> Unit,
+    showWordFinder: Boolean, coreWords: List<AACCell>, quickFires: List<AACCell>, onWordFinderShow: (WordGuide) -> Unit, onWordFinderDismiss: () -> Unit,
     showStats: Boolean, usageStats: Map<String, Int>, onStatsDismiss: () -> Unit, onStatsReset: () -> Unit,
     showEditDialog: Boolean, cellToEdit: AACCell?, allButtons: List<AACCell>,
     onEditDelete: (AACCell) -> Unit, onEditSave: (AACCell, Boolean, AACCell?) -> Unit, onEditDismiss: () -> Unit
@@ -893,7 +939,7 @@ fun DialogManager(
     if (showSettings) SettingsDialog(currentBg, currentPitch, currentRate, currentDebounce, currentCviMode, currentAutoReturn, onSettingsDismiss, onSettingsSave)
     if (showHelp) HelpDialog(onDismiss = onHelpDismiss)
     if (showCalibration) CalibrationTest(onFinished = onCalibrationFinished)
-    if (showWordFinder) WordFinderDialog(allButtons = allButtons, onDismiss = onWordFinderDismiss)
+    if (showWordFinder) WordFinderDialog(allButtons = allButtons, coreWords = coreWords, quickFires = quickFires, onShow = onWordFinderShow, onDismiss = onWordFinderDismiss)
     if (showStats) StatsDialog(stats = usageStats, onDismiss = onStatsDismiss, onReset = onStatsReset)
     if (showEditDialog && cellToEdit != null) EditDialog(cellToEdit, allButtons, onDelete = onEditDelete, onSave = onEditSave, onDismiss = onEditDismiss)
 }
