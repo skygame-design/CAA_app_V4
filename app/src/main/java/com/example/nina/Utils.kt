@@ -42,24 +42,38 @@ fun saveImageToInternalStorage(context: Context, uri: Uri): String? {
 }
 
 /**
- * Télécharge une image depuis le web et la stocke localement.
+ * Télécharge une image depuis le web et la stocke dans la tablette, pour qu'elle reste visible hors réseau.
+ * Le fichier est gardé tel quel (PNG, JPG ou SVG) : le SVG ne peut pas passer par BitmapFactory.
+ * Renvoie le chemin local, ou null si le téléchargement échoue.
  */
 fun saveImageLocally(context: Context, urlString: String, name: String): String? {
     return try {
-        val url = URL(urlString)
-        val connection = url.openConnection()
-        connection.connect()
-        val input = connection.getInputStream()
-        val bitmap = BitmapFactory.decodeStream(input)
-        val file = File(context.filesDir, "$name.png")
-        val out = FileOutputStream(file)
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-        out.flush(); out.close()
+        val connection = URL(urlString).openConnection().apply {
+            connectTimeout = 10_000; readTimeout = 15_000
+        }
+        val bytes = connection.getInputStream().use { it.readBytes() }
+        if (bytes.isEmpty()) return null
+        val safeName = name.replace(Regex("[^\\p{L}\\p{N}_-]"), "_")
+        val file = File(context.filesDir, "$safeName.${imageExtension(urlString, connection.contentType, bytes)}")
+        file.writeBytes(bytes)
         file.absolutePath
     } catch (_: Exception) {
         null
     }
 }
+
+/** Extension du fichier image, d'après le type annoncé, le contenu, puis l'adresse. */
+fun imageExtension(url: String, contentType: String?, bytes: ByteArray): String {
+    val head = String(bytes.copyOfRange(0, minOf(bytes.size, 256)), Charsets.UTF_8)
+    return when {
+        contentType?.contains("svg") == true || head.contains("<svg") -> "svg"
+        contentType?.contains("jpeg") == true || url.lowercase().substringBefore('?').endsWith(".jpg") -> "jpg"
+        else -> "png"
+    }
+}
+
+/** Vrai si l'image est une adresse web (donc pas encore enregistrée dans la tablette). */
+fun isRemoteImage(imageUrl: String?) = imageUrl != null && (imageUrl.startsWith("http://") || imageUrl.startsWith("https://"))
 
 /**
  * Contenu complet d'un fichier de sauvegarde : grille, Core Words et Quick Fires.

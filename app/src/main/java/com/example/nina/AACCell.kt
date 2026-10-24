@@ -23,7 +23,10 @@ data class AACCell(
     val imageRes: Int? = null,
     val content: SnapshotStateList<AACCell> = mutableStateListOf(),
     val id: String = newCellId(),
-    val spokenText: String? = null
+    val spokenText: String? = null,
+    // Adresse web d'origine de l'image, gardée quand l'image est enregistrée dans la tablette :
+    // sur une autre tablette (sauvegarde restaurée), elle permet de retélécharger l'image
+    val sourceUrl: String? = null
 ) {
     /** Ce que la synthèse vocale dit quand on touche le picto. */
     val textToSpeak: String

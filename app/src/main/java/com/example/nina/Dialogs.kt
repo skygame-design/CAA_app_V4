@@ -63,6 +63,79 @@ fun SettingsSectionTitle(title: String) {
 }
 
 /**
+ * Recherche d'images dans toutes les banques (ARASAAC, Mulberry, Sclera, Tawasol, Twemoji…),
+ * avec un filtre par banque et la licence de l'image choisie (à respecter et créditer).
+ * L'image choisie est téléchargée dans la tablette à l'enregistrement du picto.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun PictoSearchPanel(query: String, selectedUrl: String?, onSelect: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var results by remember { mutableStateOf<List<PictoResult>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var searched by remember { mutableStateOf(false) }
+    var sourceFilter by remember { mutableStateOf<String?>(null) }
+    val accent = Color(0xFF4A5D91)
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            onClick = {
+                if (query.isBlank() || isLoading) return@Button
+                scope.launch {
+                    isLoading = true; sourceFilter = null
+                    results = PictoSearch.search(query)
+                    isLoading = false; searched = true
+                }
+            },
+            enabled = query.isNotBlank(),
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = accent)
+        ) {
+            if (isLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+            else {
+                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Chercher « ${query.trim().ifEmpty { "…" }} » dans les banques d'images", fontSize = 12.sp)
+            }
+        }
+
+        if (searched && results.isEmpty()) {
+            Text("Aucune image trouvée (ou pas de réseau). Essayez un autre mot, ou une photo de la galerie.", fontSize = 12.sp, color = Color.Gray)
+        }
+
+        if (results.isNotEmpty()) {
+            // Filtre par banque, avec le nombre d'images
+            val counts = results.groupingBy { it.source }.eachCount()
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(selected = sourceFilter == null, onClick = { sourceFilter = null }, label = { Text("Toutes (${results.size})") })
+                counts.forEach { (source, count) ->
+                    FilterChip(selected = sourceFilter == source, onClick = { sourceFilter = source }, label = { Text("$source ($count)") })
+                }
+            }
+            val shown = results.filter { sourceFilter == null || it.source == sourceFilter }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(shown) { res ->
+                    val selected = selectedUrl == res.imageUrl
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(76.dp)) {
+                        AsyncImage(
+                            model = res.imageUrl, contentDescription = res.source,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.size(70.dp).clip(RoundedCornerShape(8.dp)).background(Color.White)
+                                .border(if (selected) 3.dp else 1.dp, if (selected) accent else Color.LightGray, RoundedCornerShape(8.dp))
+                                .clickable { onSelect(res.imageUrl) }.padding(4.dp)
+                        )
+                        Text(res.source, fontSize = 10.sp, color = Color.Gray, maxLines = 1)
+                    }
+                }
+            }
+            results.firstOrNull { it.imageUrl == selectedUrl }?.let {
+                Text("Image : ${it.source} — licence ${it.licence}", fontSize = 11.sp, color = Color.Gray)
+            }
+        }
+    }
+}
+
+/**
  * Formes d'un mot, ouvertes par un appui long (comme les "Word Forms" de TD Snap) :
  * conjugaisons d'un verbe, ou singulier / pluriel d'un nom. Toucher une forme l'ajoute à la phrase.
  */
@@ -160,14 +233,12 @@ fun AddButtonDialog(onDismiss: () -> Unit, onConfirm: (AACCell) -> Unit) {
     var isHidden by remember { mutableStateOf(value = false) }
     var selectedUrl by remember { mutableStateOf<String?>(null) }
     var selectedColor by remember { mutableLongStateOf(0xFFFFD54FL) }
-    var isLoading by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(value = false) }
 
     var audioPath by remember { mutableStateOf<String?>(null) }
     var isRecording by remember { mutableStateOf(false) }
     val recorder = remember { AudioRecorder(context) }
     val scope = rememberCoroutineScope()
-    val searchResults = remember { mutableStateListOf<OpenSymbolResponse>() }
 
     // Lanceur pour choisir une image dans la galerie
     val photoLauncher =
@@ -198,10 +269,12 @@ fun AddButtonDialog(onDismiss: () -> Unit, onConfirm: (AACCell) -> Unit) {
                             onClick = {
                                 isSaving = true
                                 scope.launch(Dispatchers.IO) {
-                                    val finalUrl = if (selectedUrl?.startsWith("http") == true) saveImageLocally(context, selectedUrl!!, "${label.trim()}_${System.currentTimeMillis()}") else selectedUrl
+                                    // Image du web : enregistrée dans la tablette ; si le téléchargement échoue, on garde l'adresse (réessai au démarrage)
+                                    val remote = selectedUrl?.takeIf { isRemoteImage(it) }
+                                    val finalUrl = if (remote != null) saveImageLocally(context, remote, "picto_${System.currentTimeMillis()}") ?: remote else selectedUrl
                                     withContext(Dispatchers.Main) {
                                         isSaving = false
-                                        onConfirm(AACCell(label = label, colorLong = selectedColor, imageUrl = finalUrl, audioPath = audioPath, isFolder = isFolder, isQuickPhrase = isQuickPhrase, isHidden = isHidden, spokenText = spokenText.trim().ifBlank { null }))
+                                        onConfirm(AACCell(label = label, colorLong = selectedColor, imageUrl = finalUrl, audioPath = audioPath, isFolder = isFolder, isQuickPhrase = isQuickPhrase, isHidden = isHidden, spokenText = spokenText.trim().ifBlank { null }, sourceUrl = remote))
                                     }
                                 }
                             },
@@ -257,37 +330,11 @@ fun AddButtonDialog(onDismiss: () -> Unit, onConfirm: (AACCell) -> Unit) {
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Image du picto", fontWeight = FontWeight.Bold)
-                                Text("Choisissez une image ou cherchez sur ARASAAC.", style = MaterialTheme.typography.bodySmall)
-                                Button(
-                                    onClick = {
-                                        if (label.isBlank()) return@Button
-                                        scope.launch(Dispatchers.IO) {
-                                            withContext(Dispatchers.Main) { isLoading = true; searchResults.clear() }
-                                            try {
-                                                val araResults = RetrofitInstance.arasaacApi.searchPictograms(label.trim().lowercase())
-                                                val mapped = araResults.map { OpenSymbolResponse("ARASAAC", "https://static.arasaac.org/pictograms/${it._id}/${it._id}_300.png") }
-                                                withContext(Dispatchers.Main) { searchResults.addAll(mapped) }
-                                            } catch (e: Exception) { e.printStackTrace() }
-                                            finally { withContext(Dispatchers.Main) { isLoading = false } }
-                                        }
-                                    },
-                                    modifier = Modifier.padding(top = 8.dp),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    if (isLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
-                                    else Text("Chercher ARASAAC", fontSize = 12.sp)
-                                }
+                                Text("Touchez le carré pour une photo de la galerie, ou cherchez dans les banques d'images.", style = MaterialTheme.typography.bodySmall)
                             }
                         }
-
-                        if (searchResults.isNotEmpty()) {
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(searchResults) { res ->
-                                    AsyncImage(model = res.imageUrl, contentDescription = null, modifier = Modifier.size(70.dp).clip(RoundedCornerShape(8.dp)).border(if (selectedUrl == res.imageUrl) 3.dp else 1.dp, if (selectedUrl == res.imageUrl) MaterialTheme.colorScheme.primary else Color.LightGray, RoundedCornerShape(8.dp)).clickable { selectedUrl = res.imageUrl })
-                                }
-                            }
-                        }
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                        PictoSearchPanel(query = label, selectedUrl = selectedUrl, onSelect = { selectedUrl = it })
                     }
 
                     SettingsSectionTitle("Catégorie Fitzgerald")
@@ -390,7 +437,6 @@ fun EditDialog(
     var isFolder by remember { mutableStateOf(cell.isFolder) }
     var isQuickPhrase by remember { mutableStateOf(cell.isQuickPhrase) }
     var isHidden by remember { mutableStateOf(cell.isHidden) }
-    var isLoading by remember { mutableStateOf(false) }
     var pendingFolderMove by remember { mutableStateOf<AACCell?>(null) }
     var isMoveRequested by remember { mutableStateOf(false) }
 
@@ -412,7 +458,6 @@ fun EditDialog(
         }
     }
 
-    val searchResults = remember { mutableStateListOf<OpenSymbolResponse>() }
     val scope = rememberCoroutineScope()
     // Un dossier ne peut aller ni dans lui-même ni dans un de ses sous-dossiers
     val ownFolderIds = remember(cell) { allFolders(listOf(cell)).map { it.id }.toSet() + cell.id }
@@ -543,39 +588,11 @@ fun EditDialog(
                                     }
                                     Spacer(modifier = Modifier.width(16.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Button(
-                                            onClick = {
-                                                if (name.isBlank()) return@Button
-                                                scope.launch(Dispatchers.IO) {
-                                                    withContext(Dispatchers.Main) { isLoading = true; searchResults.clear() }
-                                                    try {
-                                                        val results = RetrofitInstance.arasaacApi.searchPictograms(name.trim().lowercase())
-                                                        val mapped = results.map { OpenSymbolResponse("ARASAAC", "https://static.arasaac.org/pictograms/${it._id}/${it._id}_300.png") }
-                                                        withContext(Dispatchers.Main) { searchResults.addAll(mapped) }
-                                                    } catch (e: Exception) { e.printStackTrace() }
-                                                    finally { withContext(Dispatchers.Main) { isLoading = false } }
-                                                }
-                                            },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            if (isLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White)
-                                            else Text("Chercher ARASAAC", fontSize = 12.sp)
-                                        }
-                                        Text("Appuyez sur le carré pour la galerie", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                        Text("Image du picto", fontWeight = FontWeight.Bold)
+                                        Text("Touchez le carré pour une photo de la galerie, ou cherchez dans les banques d'images.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                                     }
                                 }
-
-                                if (searchResults.isNotEmpty()) {
-                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-                                        items(searchResults) { res ->
-                                            AsyncImage(
-                                                model = res.imageUrl, contentDescription = null,
-                                                modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).border(if (imageUrl == res.imageUrl) 3.dp else 1.dp, if (imageUrl == res.imageUrl) Color(0xFF4A5D91) else Color.LightGray, RoundedCornerShape(8.dp)).clickable { imageUrl = res.imageUrl }
-                                            )
-                                        }
-                                    }
-                                }
+                                PictoSearchPanel(query = name, selectedUrl = imageUrl, onSelect = { imageUrl = it })
 
                                 HorizontalDivider()
 
@@ -1568,7 +1585,7 @@ private val helpTopics = listOf(
             HelpSteps(
                 "Ajouter un picto", listOf(
                     "Barre du mode adulte › Ajouter, puis choisis la zone : grille (ou dossier ouvert), colonne des dossiers ou phrases rapides.",
-                    "Choisis un texte, une image (recherche ARASAAC ou photo de la galerie) et une couleur.",
+                    "Choisis un texte, une image (recherche dans les banques ARASAAC, Mulberry, Sclera… ou photo de la galerie) et une couleur.",
                     "Touche « Créer »."
                 )
             ),
@@ -1639,7 +1656,25 @@ private val helpTopics = listOf(
                     "⋮ › Restaurer" to "recharge un fichier de sauvegarde, y compris les anciennes"
                 )
             ),
+            HelpTip("Les images des banques (ARASAAC, Mulberry…) sont enregistrées dans la tablette et fonctionnent hors réseau. Sur une nouvelle tablette, elles sont retéléchargées automatiquement après la restauration (il faut du réseau une fois)."),
             HelpTip("Les photos de la galerie et les voix enregistrées restent sur la tablette : sur une nouvelle tablette, elles seront à refaire. Les statistiques ne sont pas dans la sauvegarde.")
+        )
+    ),
+    HelpTopic(
+        Icons.Default.Image, "Images et crédits", "Banques de pictogrammes", isNew = true,
+        blocks = listOf(
+            HelpText("En créant ou modifiant un picto, « Chercher » interroge plusieurs banques à la fois. Les filtres permettent de n'en voir qu'une. L'image choisie est enregistrée dans la tablette : elle reste visible sans réseau."),
+            HelpRows(
+                "Les banques et leurs licences", listOf(
+                    "ARASAAC" to "Sergio Palao, Gouvernement d'Aragon (arasaac.org) — CC BY-NC-SA",
+                    "Mulberry" to "Steve Lee, mulberrysymbols.org — CC BY-SA",
+                    "Sclera" to "Sclera vzw, sclera.be — CC BY-NC",
+                    "Blissymbolics" to "Blissymbolics Communication International — CC BY-SA",
+                    "Tawasol, Twemoji, Noun Project…" to "via opensymbols.org — licence indiquée sous l'image choisie"
+                )
+            ),
+            HelpText("Recherche fournie par globalsymbols.com et opensymbols.org. « NC » signifie usage non commercial : parfait pour un usage personnel ou thérapeutique, mais pas pour vendre l'application."),
+            HelpTip("Si une banque ne répond pas, les autres s'affichent quand même. Sans réseau, la recherche est impossible, mais tous les pictos déjà créés restent visibles.")
         )
     )
 )

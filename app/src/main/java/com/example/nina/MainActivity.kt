@@ -67,7 +67,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
+        // Chargeur d'images commun : sait aussi afficher les pictos SVG (en ligne ou enregistrés dans la tablette)
+        coil.Coil.setImageLoader(
+            coil.ImageLoader.Builder(this).components { add(coil.decode.SvgDecoder.Factory()) }.build()
+        )
+
         // Initialisation de la synthèse vocale
         tts = TextToSpeech(this, this)
         requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -176,10 +181,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     var rightPreviousRect by remember { mutableStateOf(Rect.Zero) }
                     var rightNextRect by remember { mutableStateOf(Rect.Zero) }
 
-                    // Cherche les images ARASAAC des pictos marqués "FETCH", puis enregistre leurs adresses :
-                    // sans cela, elles étaient recherchées à chaque démarrage et restaient vides sans réseau
+                    // Cherche les images des pictos marqués "FETCH" et télécharge dans la tablette celles encore sur le web,
+                    // puis enregistre : les pictos restent visibles hors réseau
                     suspend fun fetchAndSaveImages() {
-                        withContext(Dispatchers.IO) { updateCellsWithImages(boutons, coreWords, quickFires) }
+                        withContext(Dispatchers.IO) { updateCellsWithImages(context, boutons, coreWords, quickFires) }
                         saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
                     }
 
@@ -826,10 +831,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         onEditSave = { edited, moveRequested, moveTarget ->
                             scope.launch(Dispatchers.IO) {
                                 val newUrl = edited.imageUrl
-                                val finalUrl = if (newUrl?.startsWith("http") == true) saveImageLocally(context, newUrl, "${edited.label.trim()}_${System.currentTimeMillis()}") else newUrl
+                                // Image du web : enregistrée dans la tablette ; si le téléchargement échoue, on garde l'adresse (réessai au démarrage)
+                                val isNewRemote = isRemoteImage(newUrl)
+                                val finalUrl = if (isNewRemote) saveImageLocally(context, newUrl!!, "picto_${edited.id}_${System.currentTimeMillis()}") ?: newUrl else newUrl
+                                val finalSource = if (isNewRemote) newUrl else if (newUrl == targetCellImage(edited, coreWords, currentButtons, quickFires)) edited.sourceUrl else null
                                 withContext(Dispatchers.Main) {
                                     // On modifie d'abord, puis on déplace la version modifiée (sinon les modifications étaient perdues)
-                                    val updated = replaceCellInLists(edited.copy(imageUrl = finalUrl), coreWords, currentButtons, quickFires)
+                                    val updated = replaceCellInLists(edited.copy(imageUrl = finalUrl, sourceUrl = finalSource), coreWords, currentButtons, quickFires)
                                     if (moveRequested && updated != null) {
                                         moveCell(updated, moveTarget?.content ?: boutons, coreWords, currentButtons, quickFires)
                                     }
@@ -1177,21 +1185,40 @@ fun DialogManager(
 }
 
 // Fonctions privées de logique
-private suspend fun updateCellsWithImages(vararg lists: MutableList<AACCell>) {
+/**
+ * Prépare les images pour un usage hors réseau :
+ * 1. les pictos marqués "FETCH" reçoivent la première image ARASAAC trouvée pour leur libellé ;
+ * 2. toute image encore sur le web est téléchargée dans la tablette (fichier nommé d'après l'id du picto).
+ * En cas d'échec (pas de réseau), l'adresse web est gardée et on réessaiera au prochain démarrage.
+ */
+private suspend fun updateCellsWithImages(context: Context, vararg lists: MutableList<AACCell>) {
     lists.forEach { list ->
-        list.forEachIndexed { i, cell ->
+        list.forEachIndexed { i, original ->
+            var cell = original
             if (cell.imageUrl == "FETCH") {
                 try {
                     val results = RetrofitInstance.arasaacApi.searchPictograms(cell.label.lowercase())
-                    if (results.isNotEmpty()) {
-                        list[i] = cell.copy(imageUrl = "https://static.arasaac.org/pictograms/${results.first()._id}/${results.first()._id}_300.png")
-                    }
-                } catch (e: Exception) {}
+                    if (results.isNotEmpty()) cell = cell.copy(imageUrl = PictoSearch.arasaacUrl(results.first()._id))
+                } catch (_: Exception) {}
             }
-            if (cell.isFolder) updateCellsWithImages(cell.content)
+            // Fichier local disparu (sauvegarde restaurée sur une autre tablette) : on repart de l'adresse d'origine
+            val local = cell.imageUrl
+            if (local != null && local.startsWith("/") && !java.io.File(local).exists() && cell.sourceUrl != null) {
+                cell = cell.copy(imageUrl = cell.sourceUrl)
+            }
+            if (isRemoteImage(cell.imageUrl)) {
+                val remote = cell.imageUrl!!
+                saveImageLocally(context, remote, "picto_${cell.id}")?.let { path -> cell = cell.copy(imageUrl = path, sourceUrl = remote) }
+            }
+            if (cell !== original && i < list.size && list[i].id == original.id) list[i] = cell
+            if (cell.isFolder) updateCellsWithImages(context, cell.content)
         }
     }
 }
+
+/** Image actuelle du picto (avant modification), pour savoir si l'utilisateur l'a changée. */
+private fun targetCellImage(cell: AACCell, vararg lists: List<AACCell>): String? =
+    lists.firstNotNullOfOrNull { list -> list.firstOrNull { it.id == cell.id } }?.imageUrl
 
 /** Position d'un picto dans la liste, retrouvé par son id (même s'il a été modifié entre-temps). */
 private fun List<AACCell>.indexOfCell(cell: AACCell): Int = indexOfFirst { it.id == cell.id }

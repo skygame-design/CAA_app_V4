@@ -7,11 +7,6 @@ import retrofit2.http.Path
 
 data class ArasaacSearchResponse(val _id: Int)
 
-data class OpenSymbolResponse(
-    val name: String? = null,
-    val imageUrl: String? = null
-)
-
 interface ArasaacService {
     @GET("fr/search/{label}")
     suspend fun searchPictograms(@Path("label") label: String): List<ArasaacSearchResponse>
