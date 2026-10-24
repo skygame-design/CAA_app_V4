@@ -113,6 +113,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     var voicePitch by remember { mutableFloatStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getFloat("voice_pitch", 1.2f)) }
                     var voiceRate by remember { mutableFloatStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getFloat("voice_rate", 0.85f)) }
                     var debounceTime by remember { mutableLongStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getLong("debounce_time", 500L)) }
+                    var autoReturnHome by remember { mutableStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getBoolean("auto_return_home", true)) }
 
                     var isKioskMode by remember { mutableStateOf(false) }
                     val activity = context as? android.app.Activity
@@ -480,7 +481,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                                         playCellAudio(cell, voicePitch, voiceRate)
                                                                         trackWordUsage(cell, context, { usageStats = it })
                                                                         if (cell.isFolder) navigationStack.add(cell)
-                                                                        else if (!cell.isQuickPhrase) phrase.add(cell)
+                                                                        else {
+                                                                            if (!cell.isQuickPhrase) phrase.add(cell)
+                                                                            // Après le choix d'un mot dans un dossier, on revient à l'accueil (comme TD Snap / Grid 3)
+                                                                            if (autoReturnHome) navigationStack.clear()
+                                                                        }
                                                                     }
                                                                 },
                                                                 onLongClick = {
@@ -612,13 +617,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             showAddDialog = false; isAddingToCore = false; isAddingToQuickFires = false
                         },
                         showSettings = showSettingsDialog,
-                        currentBg = backgroundColor, currentPitch = voicePitch, currentRate = voiceRate, currentDebounce = debounceTime, currentCviMode = isCviMode,
+                        currentBg = backgroundColor, currentPitch = voicePitch, currentRate = voiceRate, currentDebounce = debounceTime, currentCviMode = isCviMode, currentAutoReturn = autoReturnHome,
                         onSettingsDismiss = { showSettingsDialog = false },
-                        onSettingsSave = { newColor, newPitch, newRate, newDebounce, newCviMode ->
-                            backgroundColor = newColor; voicePitch = newPitch; voiceRate = newRate; debounceTime = newDebounce; isCviMode = newCviMode
+                        onSettingsSave = { newColor, newPitch, newRate, newDebounce, newCviMode, newAutoReturn ->
+                            backgroundColor = newColor; voicePitch = newPitch; voiceRate = newRate; debounceTime = newDebounce; isCviMode = newCviMode; autoReturnHome = newAutoReturn
                             context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit()
                                 .putLong("bg_color", newColor).putFloat("voice_pitch", newPitch).putFloat("voice_rate", newRate)
-                                .putLong("debounce_time", newDebounce).putBoolean("cvi_mode", newCviMode).apply()
+                                .putLong("debounce_time", newDebounce).putBoolean("cvi_mode", newCviMode)
+                                .putBoolean("auto_return_home", newAutoReturn).apply()
                         },
                         showHelp = showHelpDialog, onHelpDismiss = { showHelpDialog = false },
                         showCalibration = showCalibration, onCalibrationFinished = { x, y ->
@@ -841,8 +847,8 @@ fun DialogManager(
     showKeyboardDialog: Boolean, onKeyboardDismiss: () -> Unit, onKeyboardValidate: (AACCell) -> Unit,
     showAdminChallenge: Boolean, onAdminSuccess: () -> Unit, onAdminDismiss: () -> Unit,
     showAddDialog: Boolean, onAddDismiss: () -> Unit, onAddConfirm: (AACCell) -> Unit,
-    showSettings: Boolean, currentBg: Long, currentPitch: Float, currentRate: Float, currentDebounce: Long, currentCviMode: Boolean,
-    onSettingsDismiss: () -> Unit, onSettingsSave: (Long, Float, Float, Long, Boolean) -> Unit,
+    showSettings: Boolean, currentBg: Long, currentPitch: Float, currentRate: Float, currentDebounce: Long, currentCviMode: Boolean, currentAutoReturn: Boolean,
+    onSettingsDismiss: () -> Unit, onSettingsSave: (Long, Float, Float, Long, Boolean, Boolean) -> Unit,
     showHelp: Boolean, onHelpDismiss: () -> Unit,
     showCalibration: Boolean, onCalibrationFinished: (Float, Float) -> Unit,
     showWordFinder: Boolean, onWordFinderDismiss: () -> Unit,
@@ -853,7 +859,7 @@ fun DialogManager(
     if (showKeyboardDialog) KeyboardInputDialog(onDismiss = onKeyboardDismiss, onValidate = onKeyboardValidate)
     if (showAdminChallenge) AdminChallengeDialog(onDismiss = onAdminDismiss, onSuccess = onAdminSuccess)
     if (showAddDialog) AddButtonDialog(onDismiss = onAddDismiss, onConfirm = onAddConfirm)
-    if (showSettings) SettingsDialog(currentBg, currentPitch, currentRate, currentDebounce, currentCviMode, onSettingsDismiss, onSettingsSave)
+    if (showSettings) SettingsDialog(currentBg, currentPitch, currentRate, currentDebounce, currentCviMode, currentAutoReturn, onSettingsDismiss, onSettingsSave)
     if (showHelp) HelpDialog(onDismiss = onHelpDismiss)
     if (showCalibration) CalibrationTest(onFinished = onCalibrationFinished)
     if (showWordFinder) WordFinderDialog(allButtons = allButtons, onDismiss = onWordFinderDismiss)

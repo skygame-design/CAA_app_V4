@@ -71,18 +71,10 @@ fun SentenceBar(sentence: SnapshotStateList<AACCell>, onClear: () -> Unit, hapti
                 else LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     itemsIndexed(sentence) { index, cell ->
                         // Chaque picto dans la barre peut être supprimé d'un simple clic
-                        AsyncImage(
-                            model = cell.imageUrl, contentDescription = null,
-                            modifier = Modifier
-                                .size(75.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .border(1.dp, Color.LightGray, RoundedCornerShape(12.dp))
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress); if (index < sentence.size) sentence.removeAt(
-                                    index
-                                )
-                                }
-                        )
+                        SentenceItem(cell) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            if (index < sentence.size) sentence.removeAt(index)
+                        }
                     }
                 }
             }
@@ -102,6 +94,44 @@ fun SentenceBar(sentence: SnapshotStateList<AACCell>, onClear: () -> Unit, hapti
                     tint = Color.Red
                 )
             }
+        }
+    }
+}
+
+/**
+ * Un mot de la barre de phrase : l'image avec le texte en dessous (aide à la lecture).
+ * Sans image (mot tapé au clavier), seul le texte est affiché.
+ */
+@Composable
+private fun SentenceItem(cell: AACCell, onRemove: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .height(84.dp)
+            .widthIn(min = 70.dp)
+            .clip(shape)
+            .background(Color(cell.colorLong).copy(alpha = 0.25f))
+            .border(1.dp, Color.LightGray, shape)
+            .clickable(onClick = onRemove)
+            .padding(horizontal = 4.dp, vertical = 2.dp)
+    ) {
+        if (!cell.imageUrl.isNullOrEmpty() && cell.imageUrl != "FETCH") {
+            AsyncImage(
+                model = cell.imageUrl, contentDescription = cell.label,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(58.dp)
+            )
+            Text(
+                cell.label, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, color = Color.DarkGray, textAlign = TextAlign.Center
+            )
+        } else {
+            Text(
+                cell.label, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                maxLines = 2, color = Color.DarkGray, textAlign = TextAlign.Center
+            )
         }
     }
 }

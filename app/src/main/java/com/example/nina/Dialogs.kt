@@ -968,9 +968,11 @@ fun SettingsDialog(
     currentRate: Float,
     currentDebounce: Long,
     currentCviMode: Boolean,
+    currentAutoReturn: Boolean,
     onDismiss: () -> Unit,
-    onSaveSettings: (Long, Float, Float, Long, Boolean) -> Unit
+    onSaveSettings: (Long, Float, Float, Long, Boolean, Boolean) -> Unit
 ) {
+    var tempAutoReturn by remember { mutableStateOf(currentAutoReturn) }
     var selectedColor by remember { mutableLongStateOf(currentBg) }
     var tempPitch by remember { mutableFloatStateOf(currentPitch) }
     var tempRate by remember { mutableFloatStateOf(currentRate) }
@@ -1071,6 +1073,16 @@ fun SettingsDialog(
                                     Slider(value = tempDebounce, onValueChange = { tempDebounce = it }, valueRange = 0f..2f, modifier = Modifier.weight(1f))
                                     Text(String.format(Locale.US, "%.1fs", tempDebounce), modifier = Modifier.width(40.dp), textAlign = TextAlign.End, fontSize = 12.sp)
                                 }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Retour à l'accueil", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        Text("Après le choix d'un mot dans un dossier", fontSize = 12.sp, color = Color.Gray)
+                                    }
+                                    Switch(checked = tempAutoReturn, onCheckedChange = { tempAutoReturn = it })
+                                }
                             }
                         }
                     }
@@ -1080,7 +1092,7 @@ fun SettingsDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    onSaveSettings(selectedColor, tempPitch, tempRate, (tempDebounce * 1000).toLong(), tempCviMode)
+                    onSaveSettings(selectedColor, tempPitch, tempRate, (tempDebounce * 1000).toLong(), tempCviMode, tempAutoReturn)
                     onDismiss()
                 },
                 shape = RoundedCornerShape(20.dp),
