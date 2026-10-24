@@ -1437,14 +1437,14 @@ private val helpTopics = listOf(
             HelpScreenMap,
             HelpSteps(
                 "Les zones de l'écran", listOf(
-                    "Barre de phrase (en haut) : les mots choisis s'y alignent. Le bouton vert ▶ lit la phrase.",
+                    "Barre de phrase (en haut) : les mots choisis s'y alignent. Le bouton vert ▶, ou un appui sur la barre, lit la phrase.",
                     "Mots essentiels (colonne de gauche) : les mots les plus utiles, toujours visibles.",
-                    "Grille (au centre) : le vocabulaire, rangé en dossiers. Le bouton ← revient en arrière.",
+                    "Grille (au centre) : le vocabulaire, rangé en dossiers. Elle ne défile jamais ; s'il y a trop de pictos, les boutons ◀ ▶ en bas changent de page. Le bouton ← revient en arrière.",
                     "Phrases rapides (colonne de droite, éclair ⚡) : dites tout de suite, sans passer par la phrase.",
                     "Cadenas (en haut à droite) : ouvre le mode adulte pour personnaliser."
                 )
             ),
-            HelpTip("La loupe 🔍 cherche un mot et peut montrer où il se trouve. Le clavier ⌨ permet d'écrire un mot qui n'a pas de picto.")
+            HelpTip("À droite de la barre de phrase, la loupe 🔍 cherche un mot et peut montrer où il se trouve ; le clavier ⌨ permet d'écrire un mot qui n'a pas de picto.")
         )
     ),
     HelpTopic(
@@ -1453,8 +1453,8 @@ private val helpTopics = listOf(
             HelpSteps(
                 null, listOf(
                     "Touche les pictos dans l'ordre : chaque mot est dit et s'ajoute à la barre, avec son image et son texte.",
-                    "Pour retirer un mot, touche-le dans la barre. La poubelle rouge efface toute la phrase.",
-                    "Appuie sur ▶ : Nina lit la phrase en la mettant en bon français."
+                    "Pour corriger, ⌫ efface le dernier mot. La poubelle rouge efface toute la phrase.",
+                    "Appuie sur ▶ ou touche la barre : Nina lit la phrase en la mettant en bon français."
                 )
             ),
             HelpRows(
@@ -1548,7 +1548,8 @@ private val helpTopics = listOf(
                     "Cadenas ouvert, fais un appui long sur un picto puis glisse-le.",
                     "Lâché au centre d'une case : les deux pictos s'échangent.",
                     "Lâché sur le bord gauche ou droit d'une case : il s'insère avant ou après.",
-                    "Lâché sur une colonne : il y est copié (mots essentiels ou phrases rapides)."
+                    "Lâché sur une colonne : il y est copié (mots essentiels ou phrases rapides).",
+                    "Pour l'emmener sur une autre page, garde-le une seconde sur le bouton ◀ ou ▶ : la page tourne."
                 )
             ),
             HelpTip("Referme le cadenas avant de rendre la tablette : le mode Édition se coupe automatiquement.")
@@ -1614,7 +1615,7 @@ private val helpTopics = listOf(
             ),
             HelpRows(
                 "Ailleurs en mode adulte", listOf(
-                    "Taille de grille" to "flèches ▲▼ sous le menu (1 à 8 colonnes), mémorisée",
+                    "Taille de grille" to "flèches ▲▼ sous le menu : de 1 à 8 pictos par rangée. La grille remplit l'écran sans défiler ; s'il y a trop de pictos, des pages ◀ ▶ apparaissent. Nouveau",
                     "Calibrer le tactile" to "attraper 5 fois la coccinelle : l'écran se décale pour compenser",
                     "Mode Kiosque" to "empêche de quitter Nina par erreur"
                 )

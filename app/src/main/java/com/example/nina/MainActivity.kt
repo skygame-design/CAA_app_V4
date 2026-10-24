@@ -155,10 +155,15 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     val gridCellsBounds = remember { mutableMapOf<AACCell, Rect>() }
                     val dndState = LocalDragAndDropState.current
                     
-                    val gridState = rememberLazyGridState()
                     var gridRect by remember { mutableStateOf(Rect.Zero) }
-                    
-                    val screenHeight = context.resources.displayMetrics.heightPixels.toFloat()
+
+                    // Grille paginée (sans défilement) : page affichée, disposition calculée, boutons ◀ ▶
+                    var gridPage by remember { mutableIntStateOf(0) }
+                    var gridLayout by remember { mutableStateOf(GridLayout(1, 1, 1)) }
+                    var previousPageRect by remember { mutableStateOf(Rect.Zero) }
+                    var nextPageRect by remember { mutableStateOf(Rect.Zero) }
+                    // Chaque dossier, et chaque nouvelle taille de grille, repart de la première page
+                    LaunchedEffect(stackSize, columnCount) { gridPage = 0 }
 
                     // --- LOGIQUE D'INITIALISATION ---
                     
@@ -189,28 +194,26 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             }
                         }
 
-                    // Boucle d'Auto-Scroll à 100 FPS
+                    // Pendant un glisser-déposer : rester 0,7 s sur ◀ ou ▶ tourne la page (pour déplacer un picto vers une autre page)
                     LaunchedEffect(dndState.isDragging) {
+                        var hoverDirection = 0
+                        var hoverStart = 0L
                         while (dndState.isDragging) {
-                            val y = dndState.dragOffset.y
-                            if (gridRect.height > 0) {
-                                // Seuil Haut : 30% du haut de la grille
-                                val topThreshold = gridRect.top + (gridRect.height * 0.30f)
-                                // Seuil Bas : 50% (Milieu de la grille) pour rester loin du bas de l'écran
-                                val bottomThreshold = gridRect.top + (gridRect.height * 0.50f)
-
-                                if (y < topThreshold) {
-                                    val distance = (topThreshold - y).coerceAtLeast(0f)
-                                    val speed = (distance / (gridRect.height * 0.30f)) * 50f
-                                    gridState.scrollBy(-speed)
-                                } else if (y > bottomThreshold) {
-                                    // Scroll bas plus réactif car la zone est plus grande
-                                    val distance = (y - bottomThreshold).coerceAtLeast(0f)
-                                    val speed = (distance / (gridRect.height * 0.50f)) * 70f
-                                    gridState.scrollBy(speed)
-                                }
+                            val position = dndState.dragOffset
+                            val direction = when {
+                                nextPageRect.contains(position) -> 1
+                                previousPageRect.contains(position) -> -1
+                                else -> 0
                             }
-                            kotlinx.coroutines.delay(10)
+                            val now = System.currentTimeMillis()
+                            if (direction != hoverDirection) {
+                                hoverDirection = direction; hoverStart = now
+                            } else if (direction != 0 && now - hoverStart > 700) {
+                                gridPage = (gridPage + direction).coerceIn(0, gridLayout.pageCount - 1)
+                                hoverStart = now
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }
+                            kotlinx.coroutines.delay(50)
                         }
                     }
 
@@ -343,16 +346,21 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                         .padding(16.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    // Lit la phrase construite (bouton Play ou appui sur la barre)
+                                    val speakSentence = {
+                                        if (phrase.isNotEmpty()) {
+                                            val texteBrut = phrase.joinToString(" ") { it.label }
+                                            val texteFinal = LocalGrammarEngine.refine(texteBrut)
+                                            speakText(texteFinal, voicePitch, voiceRate)
+                                            logUsage(UsageType.SENTENCE, texteFinal)
+                                        }
+                                    }
+
                                     // Bouton Play : Prononce la phrase construite
                                     IconButton(
                                         onClick = {
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            if (phrase.isNotEmpty()) {
-                                                val texteBrut = phrase.joinToString(" ") { it.label }
-                                                val texteFinal = LocalGrammarEngine.refine(texteBrut)
-                                                speakText(texteFinal, voicePitch, voiceRate)
-                                                logUsage(UsageType.SENTENCE, texteFinal)
-                                            }
+                                            speakSentence()
                                         },
                                         enabled = phrase.isNotEmpty(),
                                         modifier = Modifier
@@ -366,15 +374,22 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                         Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(60.dp))
                                     }
 
-                                    Box(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            IconButton(onClick = { showWordFinder = true }, modifier = Modifier.padding(end = 8.dp)) {
-                                                Icon(Icons.Default.Search, contentDescription = "Chercher un mot", tint = Color(0xFF6200EE))
-                                            }
-                                            IconButton(onClick = { showKeyboardDialog = true }, modifier = Modifier.padding(end = 8.dp)) {
-                                                Icon(Icons.Default.Keyboard, contentDescription = "Saisie libre", tint = Color(0xFF6200EE))
-                                            }
-                                            SentenceBar(sentence = phrase, onClear = { phrase.clear() }, haptic = haptic)
+                                    SentenceBar(
+                                        sentence = phrase,
+                                        onSpeak = speakSentence,
+                                        onBackspace = { if (phrase.isNotEmpty()) phrase.removeAt(phrase.lastIndex) },
+                                        onClear = { phrase.clear() },
+                                        haptic = haptic,
+                                        modifier = Modifier.weight(1f).padding(horizontal = 16.dp)
+                                    )
+
+                                    // Outils de l'adulte (recherche / modélisation, saisie libre) : à l'écart de la phrase, en gris discret
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        IconButton(onClick = { showWordFinder = true }) {
+                                            Icon(Icons.Default.Search, contentDescription = "Chercher un mot", tint = Color.Gray)
+                                        }
+                                        IconButton(onClick = { showKeyboardDialog = true }) {
+                                            Icon(Icons.Default.Keyboard, contentDescription = "Saisie libre", tint = Color.Gray)
                                         }
                                     }
 
@@ -418,10 +433,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     }
                                 }
 
-                                // Fait défiler la grille jusqu'à la case à toucher
-                                LaunchedEffect(guidedId, stackSize) {
+                                // Ouvre la page où se trouve la case à toucher
+                                LaunchedEffect(guidedId, stackSize, gridLayout.perPage) {
                                     val index = currentButtons.indexOfFirst { it.id == guidedId }
-                                    if (index >= 0) gridState.animateScrollToItem(index)
+                                    if (index >= 0) gridPage = index / gridLayout.perPage
                                 }
 
                                 // --- ZONE DE CONTENU PRINCIPALE ---
@@ -489,44 +504,36 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             },
                                             label = "GridAnimation"
                                         ) { targetButtons ->
-                                            // Clés uniques : l'id du picto, suffixé (#2, #3...) par sécurité en cas de doublon pour éviter un crash de LazyGrid
-                                            val gridKeys = buildList {
-                                                val seen = mutableMapOf<String, Int>()
-                                                targetButtons.forEach { cell ->
-                                                    val n = (seen[cell.id] ?: 0) + 1
-                                                    seen[cell.id] = n
-                                                    add(if (n == 1) cell.id else "${cell.id}#$n")
-                                                }
-                                            }
-                                            LazyVerticalGrid(
-                                                columns = GridCells.Fixed(columnCount),
-                                                state = gridState,
-                                                contentPadding = PaddingValues(bottom = 500.dp),
+                                            // Grille sans défilement : de 1 à 8 pictos par rangée, des pages si tout ne tient pas
+                                            PagedGrid(
+                                                cells = targetButtons,
+                                                columns = columnCount,
+                                                page = gridPage,
+                                                onPageChange = { gridPage = it },
+                                                onLayout = { if (it != gridLayout) gridLayout = it },
+                                                onPagerBounds = { previous, next -> previousPageRect = previous; nextPageRect = next },
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .onGloballyPositioned { gridRect = it.boundsInRoot() },
-                                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                                verticalArrangement = Arrangement.spacedBy(16.dp)
-                                            ) {
-                                                itemsIndexed(
-                                                    items = targetButtons,
-                                                    key = { index, _ -> gridKeys[index] }
-                                                ) { _, cell ->
+                                                    .padding(bottom = 16.dp)
+                                                    .onGloballyPositioned { gridRect = it.boundsInRoot() }
+                                            ) { cell, cellModifier ->
                                                     var posInRoot by remember { mutableStateOf(Offset.Zero) }
                                                     // Quand la cellule quitte l'écran (scroll, changement de dossier), on oublie sa position
                                                     DisposableEffect(cell) {
                                                         onDispose { gridCellsBounds.remove(cell) }
                                                     }
                                                     DraggableCellWrapper(
-                                                        cell = cell
+                                                        cell = cell,
+                                                        modifier = cellModifier
                                                     ) {
-                                                        Box(modifier = Modifier.onGloballyPositioned { 
+                                                        Box(modifier = Modifier.fillMaxSize().onGloballyPositioned {
                                                             posInRoot = it.positionInRoot()
                                                             gridCellsBounds[cell] = it.boundsInRoot()
                                                         }) {
                                                             AACCellView(
                                                                 cell = cell, haptic = haptic, debounceTime = debounceTime,
                                                                 isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode, isGuided = cell.id == guidedId,
+                                                                modifier = Modifier.fillMaxSize(),
                                                                 onClick = {
                                                                     Log.d("Nina-Debug", "🖱️ Clic Cellule détecté")
                                                                     if (isEditMode) {
@@ -556,7 +563,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                             )
                                                         }
                                                     }
-                                                }
                                             }
                                         }
                                     }

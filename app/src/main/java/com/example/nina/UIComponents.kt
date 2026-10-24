@@ -14,6 +14,12 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -48,13 +54,24 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 
 /**
- * Composant de la barre de phrase en haut de l'écran.
- * Affiche les pictogrammes sélectionnés et permet de les supprimer.
+ * Barre de phrase en haut de l'écran (comme la "message window" de TD Snap / Grid 3) :
+ * toucher la barre lit la phrase, ⌫ efface le dernier mot, la poubelle efface tout.
  */
 @Composable
-fun SentenceBar(sentence: SnapshotStateList<AACCell>, onClear: () -> Unit, haptic: HapticFeedback) {
+fun SentenceBar(
+    sentence: SnapshotStateList<AACCell>,
+    onSpeak: () -> Unit,
+    onBackspace: () -> Unit,
+    onClear: () -> Unit,
+    haptic: HapticFeedback,
+    modifier: Modifier = Modifier
+) {
+    val listState = rememberLazyListState()
+    // Le dernier mot ajouté reste visible quand la phrase est longue
+    LaunchedEffect(sentence.size) { if (sentence.isNotEmpty()) listState.animateScrollToItem(sentence.lastIndex) }
+
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(100.dp),
         shape = RoundedCornerShape(50.dp),
@@ -64,6 +81,10 @@ fun SentenceBar(sentence: SnapshotStateList<AACCell>, onClear: () -> Unit, hapti
         Row(
             modifier = Modifier
                 .fillMaxSize()
+                .clickable(enabled = sentence.isNotEmpty()) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSpeak()
+                }
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -73,31 +94,25 @@ fun SentenceBar(sentence: SnapshotStateList<AACCell>, onClear: () -> Unit, hapti
                     color = Color.LightGray,
                     fontSize = 20.sp,
                 )
-                else LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    itemsIndexed(sentence) { index, cell ->
-                        // Chaque picto dans la barre peut être supprimé d'un simple clic
-                        SentenceItem(cell) {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            if (index < sentence.size) sentence.removeAt(index)
-                        }
-                    }
+                else LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    itemsIndexed(sentence) { _, cell -> SentenceItem(cell) }
                 }
             }
-            // Bouton de suppression totale de la phrase
-            if (sentence.isNotEmpty()) IconButton(
-                onClick = {
-                    haptic.performHapticFeedback(
-                        HapticFeedbackType.LongPress
-                    ); onClear()
-                }, modifier = Modifier
-                    .size(55.dp)
-                    .background(Color(0xFFFFEBEE), CircleShape)
-            ) {
-                Icon(
-                    Icons.Default.Delete,
-                    null,
-                    tint = Color.Red
-                )
+            if (sentence.isNotEmpty()) {
+                // Effacer le dernier mot
+                IconButton(
+                    onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onBackspace() },
+                    modifier = Modifier.padding(start = 8.dp).size(64.dp).background(Color(0xFFEDEFF7), CircleShape)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Effacer le dernier mot", tint = Color(0xFF4A5D91), modifier = Modifier.size(32.dp))
+                }
+                // Effacer toute la phrase
+                IconButton(
+                    onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onClear() },
+                    modifier = Modifier.padding(start = 12.dp).size(55.dp).background(Color(0xFFFFEBEE), CircleShape)
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = "Effacer la phrase", tint = Color.Red)
+                }
             }
         }
     }
@@ -108,7 +123,7 @@ fun SentenceBar(sentence: SnapshotStateList<AACCell>, onClear: () -> Unit, hapti
  * Sans image (mot tapé au clavier), seul le texte est affiché.
  */
 @Composable
-private fun SentenceItem(cell: AACCell, onRemove: () -> Unit) {
+private fun SentenceItem(cell: AACCell) {
     val shape = RoundedCornerShape(12.dp)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -119,7 +134,6 @@ private fun SentenceItem(cell: AACCell, onRemove: () -> Unit) {
             .clip(shape)
             .background(Color(cell.colorLong).copy(alpha = 0.25f))
             .border(1.dp, Color.LightGray, shape)
-            .clickable(onClick = onRemove)
             .padding(horizontal = 4.dp, vertical = 2.dp)
     ) {
         if (!cell.imageUrl.isNullOrEmpty() && cell.imageUrl != "FETCH") {
@@ -155,12 +169,14 @@ fun AACCellView(
     isEditMode: Boolean = false,
     isCviMode: Boolean = false,
     isGuided: Boolean = false, // Case à toucher pendant la modélisation (chemin vers un mot)
+    // Taille de la case : carrée par défaut (colonnes), imposée par la grille paginée
+    modifier: Modifier = Modifier.aspectRatio(1f),
     onClick: () -> Unit = {},
     onLongClick: () -> Unit = {},
 ) {
-    // Si le bouton est masqué et qu'on n'est pas en mode Admin, on ne l'affiche pas
+    // Si le bouton est masqué et qu'on n'est pas en mode Admin, on ne l'affiche pas (sa place reste vide)
     if (cell.isHidden && !isAdminMode) {
-        Box(modifier = Modifier.aspectRatio(1f).padding(2.dp))
+        Box(modifier = modifier.padding(2.dp))
         return
     }
 
@@ -216,8 +232,7 @@ fun AACCellView(
     } else Modifier
 
     Box(
-        modifier = Modifier
-            .aspectRatio(1f)
+        modifier = modifier
             .padding(if (cell.isFolder) 2.dp else 0.dp)
             .alpha(alpha)
             .then(visualFeedbackModifier)
@@ -252,6 +267,109 @@ fun AACCellView(
             // Contenu visuel du bouton (image + texte)
             AACCellContent(cell, isCviMode, isEditMode)
         }
+    }
+}
+
+/** Disposition calculée de la grille paginée. */
+data class GridLayout(val rows: Int, val perPage: Int, val pageCount: Int)
+
+/**
+ * Calcule combien de rangées tiennent dans la hauteur disponible, pour `columns` pictos par rangée.
+ * Une case garde au moins 65 % de sa largeur en hauteur ; au-delà de ce qui tient, on passe en pages.
+ * Fonction pure (testée sans Android), en dp.
+ */
+fun computeGridLayout(itemCount: Int, columns: Int, width: Float, height: Float, gap: Float, pagerHeight: Float): GridLayout {
+    val cellWidth = (width - gap * (columns - 1)) / columns
+    fun rowsFor(h: Float) = ((h + gap) / (cellWidth * 0.65f + gap)).toInt().coerceAtLeast(1)
+
+    val rowsAlone = rowsFor(height)
+    if (itemCount <= columns * rowsAlone) return GridLayout(rowsAlone, columns * rowsAlone, 1)
+
+    // Trop de pictos : on réserve la place des boutons de page
+    val rows = rowsFor(height - pagerHeight - gap)
+    val perPage = columns * rows
+    return GridLayout(rows, perPage, (itemCount + perPage - 1) / perPage)
+}
+
+/**
+ * Grille sans défilement : les pictos remplissent l'écran, rangée par rangée.
+ * S'il y en a trop, des boutons Page ◀ ▶ apparaissent en bas (comme les pages de TD Snap / Grid 3).
+ * Les cases vides de la dernière page gardent leur place pour que les pictos ne bougent pas.
+ */
+@Composable
+fun PagedGrid(
+    cells: List<AACCell>,
+    columns: Int,
+    page: Int,
+    onPageChange: (Int) -> Unit,
+    onLayout: (GridLayout) -> Unit,
+    onPagerBounds: (previous: Rect, next: Rect) -> Unit,
+    modifier: Modifier = Modifier,
+    cellContent: @Composable (cell: AACCell, modifier: Modifier) -> Unit
+) {
+    val gap = 16.dp
+    val pagerHeight = 72.dp
+    BoxWithConstraints(modifier = modifier) {
+        val layout = computeGridLayout(cells.size, columns, maxWidth.value, maxHeight.value, gap.value, pagerHeight.value)
+        SideEffect { onLayout(layout) }
+        val currentPage = page.coerceIn(0, layout.pageCount - 1)
+        if (currentPage != page) SideEffect { onPageChange(currentPage) }
+
+        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(gap)) {
+                repeat(layout.rows) { row ->
+                    Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        repeat(columns) { column ->
+                            val index = currentPage * layout.perPage + row * columns + column
+                            val cell = cells.getOrNull(index)
+                            if (cell != null) key(cell.id, index) { cellContent(cell, Modifier.weight(1f).fillMaxHeight()) }
+                            else Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+
+            if (layout.pageCount > 1) {
+                var previousBounds by remember { mutableStateOf(Rect.Zero) }
+                var nextBounds by remember { mutableStateOf(Rect.Zero) }
+                DisposableEffect(Unit) { onDispose { onPagerBounds(Rect.Zero, Rect.Zero) } }
+                SideEffect { onPagerBounds(previousBounds, nextBounds) }
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(pagerHeight),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(gap)
+                ) {
+                    PageButton(
+                        forward = false, enabled = currentPage > 0,
+                        modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { previousBounds = it.boundsInRoot() }
+                    ) { onPageChange(currentPage - 1) }
+                    Text(
+                        "Page ${currentPage + 1} / ${layout.pageCount}",
+                        fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4A5D91),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    PageButton(
+                        forward = true, enabled = currentPage < layout.pageCount - 1,
+                        modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { nextBounds = it.boundsInRoot() }
+                    ) { onPageChange(currentPage + 1) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PageButton(forward: Boolean, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Button(
+        onClick = onClick, enabled = enabled, modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A5D91), disabledContainerColor = Color(0xFFE6E6EE))
+    ) {
+        Icon(
+            if (forward) Icons.AutoMirrored.Filled.ArrowForward else Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = if (forward) "Page suivante" else "Page précédente",
+            modifier = Modifier.size(36.dp)
+        )
     }
 }
 
@@ -309,12 +427,13 @@ fun DragAndDropRoot(content: @Composable () -> Unit) {
 @Composable
 fun DraggableCellWrapper(
     cell: AACCell,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
     val state = LocalDragAndDropState.current
-    
+
     Box(
-        modifier = Modifier
+        modifier = modifier
             .graphicsLayer {
                 // LECTURE DIFFÉRÉE (Draw Phase) : Zéro recomposition de l'arbre UI !
                 alpha = if (state.isDragging && (state.draggedCell == cell)) 0f else 1f
@@ -330,7 +449,10 @@ fun DraggableCellWrapper(
 @Composable
 fun AACCellContent(cell: AACCell, isCviMode: Boolean = false, isEditMode: Boolean = false) {
     val textColor = if (isCviMode) Color.Yellow else Color.Black
-    
+
+    // Le texte grandit avec la case (de 8 pictos par rangée à 1 seul)
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+    val labelSize = (maxHeight.value / 11f).coerceIn(12f, 32f).sp
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -409,11 +531,14 @@ fun AACCellContent(cell: AACCell, isCviMode: Boolean = false, isEditMode: Boolea
         Text(
             cell.label.uppercase(),
             fontWeight = FontWeight.Black,
-            fontSize = 12.sp,
+            fontSize = labelSize,
+            maxLines = 2,
+            lineHeight = labelSize,
             color = textColor,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 4.dp)
         )
+    }
     }
 }
 
