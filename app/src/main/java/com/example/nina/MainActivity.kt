@@ -65,6 +65,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    // État de la voix française (hors ligne ou non), lu par l'interface pour prévenir l'adulte
+    private var voiceStatus by mutableStateOf(VoiceStatus.UNKNOWN)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -92,11 +95,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     // --- ÉTATS RÉACTIFS ---
                     
                     // Listes principales des pictogrammes
-                    val boutons = remember { mutableStateListOf<AACCell>().apply { addAll(loadButtons()) } }
+                    // Chargement unique au démarrage (avec récupération depuis une sauvegarde si besoin)
+                    val initial = remember { loadAll() }
+                    var loadNotice by remember { mutableStateOf(initial.recoveredFrom != null || initial.lost) }
+                    val boutons = remember { mutableStateListOf<AACCell>().apply { addAll(initial.layout.buttons) } }
                     val phrase = remember { mutableStateListOf<AACCell>() }
                     val navigationStack = remember { mutableStateListOf<AACCell>() } // Pile de navigation pour les dossiers
-                    val coreWords = remember { mutableStateListOf<AACCell>().apply { addAll(loadCoreWords()) } } // Barre de gauche
-                    val quickFires = remember { mutableStateListOf<AACCell>().apply { addAll(loadQuickFires()) } } // Barre de droite
+                    val coreWords = remember { mutableStateListOf<AACCell>().apply { addAll(initial.layout.coreWords.orEmpty()) } } // Barre de gauche
+                    val quickFires = remember { mutableStateListOf<AACCell>().apply { addAll(initial.layout.quickFires.orEmpty()) } } // Barre de droite
 
                     // Configuration et Dialogues
                     var columnCount by remember { mutableIntStateOf(context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getInt("column_count", 4)) }
@@ -196,6 +202,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     // Grilles prêtes : sauvegarde de l'ancienne disposition pour pouvoir revenir en arrière
                     val prefs = context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE)
                     var showRecommendedDialog by remember { mutableStateOf(false) }
+                    var showAutoBackups by remember { mutableStateOf(false) }
+                    var showVoiceHelp by remember { mutableStateOf(false) }
                     var hasPreviousLayout by remember { mutableStateOf(prefs.contains("layout_before_recommended")) }
                     val applyLayout: (NinaBackup) -> Unit = { layout ->
                         navigationStack.clear()
@@ -210,6 +218,16 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
                     // --- LOGIQUE D'INITIALISATION ---
                     
+                    // Grille récupérée (données illisibles) : on garde une copie des données abîmées, puis on enregistre la grille récupérée
+                    LaunchedEffect(Unit) {
+                        if (initial.recoveredFrom != null || initial.lost) {
+                            withContext(Dispatchers.IO) { keepUnreadableData() }
+                            saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
+                        } else {
+                            withContext(Dispatchers.IO) { autoBackupNow() } // Sauvegarde du jour dès l'ouverture
+                        }
+                    }
+
                     // --- RÉCUPÉRATION DES IMAGES MANQUANTES (Pictos ARASAAC) ---
                     LaunchedEffect(Unit) { fetchAndSaveImages() }
 
@@ -412,6 +430,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                 onBackup = { shareBackupFile(context, NinaBackup(boutons, coreWords, quickFires)) },
                                 onRestore = { openDocLauncher.launch(arrayOf("application/json")) },
                                 onRecommendedLayout = { showRecommendedDialog = true },
+                                onAutoBackups = { showAutoBackups = true },
+                                voiceWarning = when (voiceStatus) {
+                                    VoiceStatus.NETWORK_ONLY -> "Voix française seulement avec internet"
+                                    VoiceStatus.MISSING -> "Voix française absente"
+                                    else -> null
+                                },
+                                onVoiceFix = { showVoiceHelp = true },
                                 onRestorePreviousLayout = if (!hasPreviousLayout) null else ({
                                     prefs.getString("layout_before_recommended", null)?.let { json ->
                                         try { applyLayout(parseBackup(json)) } catch (e: Exception) { Log.e("Nina-Debug", "Ancienne disposition illisible", e) }
@@ -704,7 +729,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                 HoldLockButton(
                                     isAdminMode = isAdminMode,
                                     onHoldComplete = { showAdminChallengeDialog = true },
-                                    onLock = { isAdminMode = false; isEditMode = false }
+                                    onLock = { isAdminMode = false; isEditMode = false },
+                                    warning = voiceStatus == VoiceStatus.NETWORK_ONLY || voiceStatus == VoiceStatus.MISSING
                                 )
 
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -755,6 +781,56 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             }
                         }
                         }
+                    }
+
+                    if (showAutoBackups) {
+                        AutoBackupDialog(
+                            onDismiss = { showAutoBackups = false },
+                            onRestore = { layout ->
+                                // Comme pour les grilles prêtes : la disposition actuelle reste récupérable
+                                prefs.edit().putString("layout_before_recommended", GsonInstance.gson.toJson(NinaBackup(boutons.toList(), coreWords.toList(), quickFires.toList()))).apply()
+                                hasPreviousLayout = true
+                                applyLayout(layout)
+                                showAutoBackups = false
+                            }
+                        )
+                    }
+
+                    if (showVoiceHelp) {
+                        AlertDialog(
+                            onDismissRequest = { showVoiceHelp = false },
+                            title = { Text("Voix française hors ligne", fontWeight = FontWeight.Bold) },
+                            text = {
+                                Text(
+                                    (if (voiceStatus == VoiceStatus.MISSING) "La tablette n'a pas de voix française : Nina ne peut pas parler.\n\n"
+                                     else "La voix française de la tablette a besoin d'internet : sans Wi-Fi (voiture, parc…), Nina sera muette.\n\n") +
+                                    "Pour l'installer (une seule fois, avec du Wi-Fi) :\n" +
+                                    "1. Touchez « Installer la voix ».\n" +
+                                    "2. Choisissez « Français (France) » et téléchargez la voix.\n" +
+                                    "3. Revenez dans Nina : l'avertissement disparaît tout seul.\n\n" +
+                                    "Si rien ne s'ouvre : Paramètres Android › Gestion globale › Synthèse vocale › moteur Google › Installer les données vocales."
+                                )
+                            },
+                            confirmButton = { Button(onClick = { showVoiceHelp = false; openVoiceInstall() }) { Text("Installer la voix") } },
+                            dismissButton = { TextButton(onClick = { showVoiceHelp = false }) { Text("Plus tard") } }
+                        )
+                    }
+
+                    if (loadNotice) {
+                        AlertDialog(
+                            onDismissRequest = { loadNotice = false },
+                            title = { Text("Grille récupérée", fontWeight = FontWeight.Bold) },
+                            text = {
+                                Text(
+                                    initial.recoveredFrom?.let {
+                                        "La grille enregistrée n'a pas pu être lue. Elle a été récupérée depuis la sauvegarde automatique du " +
+                                        "${it.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"))}. Les changements faits après cette date sont perdus."
+                                    } ?: ("La grille enregistrée n'a pas pu être lue et aucune sauvegarde n'existe : la grille de départ a été installée. " +
+                                         "Si vous avez un fichier de sauvegarde, utilisez ⋮ › Restaurer.")
+                                )
+                            },
+                            confirmButton = { Button(onClick = { loadNotice = false }) { Text("Compris") } }
+                        )
                     }
 
                     if (showRecommendedDialog) {
@@ -864,8 +940,25 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            tts?.setLanguage(Locale.FRENCH)
+            ttsReady = true
+            voiceStatus = tts?.let { VoiceCheck.check(it) } ?: VoiceStatus.MISSING
+        } else {
+            voiceStatus = VoiceStatus.MISSING
         }
+    }
+
+    // Au retour dans l'app (par exemple après avoir installé la voix), on vérifie à nouveau
+    override fun onResume() {
+        super.onResume()
+        if (ttsReady) tts?.let { voiceStatus = VoiceCheck.check(it) }
+    }
+
+    /** Ouvre l'installation des voix du moteur vocal (ou, à défaut, les réglages de synthèse vocale d'Android). */
+    private fun openVoiceInstall() {
+        val install = android.content.Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        val settings = android.content.Intent("com.android.settings.TTS_SETTINGS").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { startActivity(install) }.recoverCatching { startActivity(settings) }
+            .onFailure { android.widget.Toast.makeText(this, "Ouvrez Paramètres › Synthèse vocale pour installer la voix française", android.widget.Toast.LENGTH_LONG).show() }
     }
 
     private fun speakText(text: String, pitch: Float = 1.0f, rate: Float = 1.0f) {
@@ -915,11 +1008,54 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             .putString("saved_buttons", GsonInstance.gson.toJson(list)).apply()
     }
 
-    private fun loadButtons(): List<AACCell> {
-        val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString("saved_buttons", null)
-        return if (json != null) {
-            try { normalizeCells(GsonInstance.gson.fromJson<List<AACCell>>(json, object : TypeToken<List<AACCell>>() {}.type)) } catch (e: Exception) { getStarterPack() }
-        } else getStarterPack()
+    /** Résultat du chargement au démarrage : la grille, et la date de la sauvegarde utilisée si on a dû récupérer. */
+    private class LoadResult(val layout: NinaBackup, val recoveredFrom: java.time.LocalDate?, val lost: Boolean)
+
+    /** Lit une liste de pictos enregistrée ; null si elle est absente, une exception si elle est abîmée. */
+    private fun readSavedList(key: String): List<AACCell>? {
+        val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString(key, null) ?: return null
+        return normalizeCells(GsonInstance.gson.fromJson<List<AACCell>>(json, object : TypeToken<List<AACCell>>() {}.type))
+    }
+
+    /**
+     * Charge la grille enregistrée. Premier lancement : la grille de départ.
+     * Données illisibles (fichier abîmé) : la dernière sauvegarde automatique, au lieu de tout réinitialiser sans prévenir.
+     */
+    private fun loadAll(): LoadResult {
+        return try {
+            val buttons = readSavedList("saved_buttons")
+            val core = readSavedList("saved_core_words")
+            val quick = readSavedList("saved_quick_fires")
+            if (buttons == null && core == null && quick == null) LoadResult(NinaBackup(getStarterPack(), getDefaultCoreWords(), getDefaultQuickFires()), null, false)
+            else LoadResult(NinaBackup(buttons ?: getStarterPack(), core ?: getDefaultCoreWords(), quick ?: getDefaultQuickFires()), null, false)
+        } catch (e: Exception) {
+            Log.e("Nina-Debug", "Grille enregistrée illisible", e)
+            val latest = AutoBackup.latest(this)
+            if (latest != null) LoadResult(latest.second, latest.first, false)
+            else LoadResult(NinaBackup(getStarterPack(), getDefaultCoreWords(), getDefaultQuickFires()), null, true)
+        }
+    }
+
+    /** Sauvegarde automatique du jour, à partir de ce qui est enregistré (seulement si c'est lisible). */
+    private fun autoBackupNow() {
+        val buttons = runCatching { readSavedList("saved_buttons") }.getOrNull() ?: return
+        val core = runCatching { readSavedList("saved_core_words") }.getOrNull()
+        val quick = runCatching { readSavedList("saved_quick_fires") }.getOrNull()
+        runCatching { AutoBackup.save(applicationContext, NinaBackup(buttons, core, quick)) }
+            .onFailure { Log.e("Nina-Debug", "Sauvegarde automatique impossible", it) }
+    }
+
+    /** Copie des données illisibles (pour pouvoir les examiner), avant qu'elles soient remplacées. */
+    private fun keepUnreadableData() {
+        val prefs = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE)
+        val raw = listOf("saved_buttons", "saved_core_words", "saved_quick_fires").joinToString("\n\n") { "$it = ${prefs.getString(it, null)}" }
+        runCatching { File(File(filesDir, "sauvegardes").apply { mkdirs() }, "illisible_${System.currentTimeMillis()}.txt").writeText(raw) }
+    }
+
+    // Quand on quitte l'app (ou qu'elle passe en arrière-plan) : sauvegarde automatique du jour
+    override fun onStop() {
+        super.onStop()
+        lifecycleScope.launch(Dispatchers.IO) { autoBackupNow() }
     }
 
     private fun saveCoreWords(list: List<AACCell>) {
@@ -927,23 +1063,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             .putString("saved_core_words", GsonInstance.gson.toJson(list)).apply()
     }
 
-    private fun loadCoreWords(): List<AACCell> {
-        val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString("saved_core_words", null)
-        return if (json != null) {
-            try { normalizeCells(GsonInstance.gson.fromJson<List<AACCell>>(json, object : TypeToken<List<AACCell>>() {}.type)) } catch (e: Exception) { getDefaultCoreWords() }
-        } else getDefaultCoreWords()
-    }
-
     private fun saveQuickFires(list: List<AACCell>) {
         getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit()
             .putString("saved_quick_fires", GsonInstance.gson.toJson(list)).apply()
-    }
-
-    private fun loadQuickFires(): List<AACCell> {
-        val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString("saved_quick_fires", null)
-        return if (json != null) {
-            try { normalizeCells(GsonInstance.gson.fromJson<List<AACCell>>(json, object : TypeToken<List<AACCell>>() {}.type)) } catch (e: Exception) { getDefaultQuickFires() }
-        } else getDefaultQuickFires()
     }
 
     private fun shareBackupFile(context: Context, backup: NinaBackup) {
@@ -985,7 +1107,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  * Un simple appui affiche seulement « Maintenir 2 s ». Cadenas ouvert, un appui le referme.
  */
 @Composable
-fun HoldLockButton(isAdminMode: Boolean, onHoldComplete: () -> Unit, onLock: () -> Unit) {
+fun HoldLockButton(isAdminMode: Boolean, onHoldComplete: () -> Unit, onLock: () -> Unit, warning: Boolean = false) {
     if (isAdminMode) {
         IconButton(onClick = onLock, modifier = Modifier.size(48.dp).background(Color(0xFFFFEB3B), CircleShape)) {
             Icon(Icons.Default.LockOpen, contentDescription = "Verrouiller")
@@ -1029,6 +1151,8 @@ fun HoldLockButton(isAdminMode: Boolean, onHoldComplete: () -> Unit, onLock: () 
                 strokeWidth = 4.dp
             )
             Icon(Icons.Default.Lock, contentDescription = "Mode adulte (maintenir 2 secondes)", tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(22.dp))
+            // Point orange discret : un réglage demande l'attention d'un adulte (voir la barre du mode adulte)
+            if (warning) Box(modifier = Modifier.align(Alignment.TopEnd).size(10.dp).background(Color(0xFFFF6D00), CircleShape))
         }
         if (showHint) Text("Maintenir 2 s", fontSize = 11.sp, color = Color.Gray)
     }
@@ -1047,6 +1171,8 @@ fun AdminToolbar(
     onCalibration: () -> Unit, isKioskMode: Boolean, onKioskToggle: () -> Unit,
     onBackup: () -> Unit, onRestore: () -> Unit,
     onRecommendedLayout: () -> Unit, onRestorePreviousLayout: (() -> Unit)?, // null : rien à restaurer
+    onAutoBackups: () -> Unit,
+    voiceWarning: String?, onVoiceFix: () -> Unit, // null : la voix fonctionne hors ligne
     onLock: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1061,6 +1187,18 @@ fun AdminToolbar(
     ) {
         Icon(Icons.Default.LockOpen, contentDescription = null, tint = Color(0xFF8D6E00))
         Text("Mode adulte", fontWeight = FontWeight.Bold, color = Color(0xFF5D4600), modifier = Modifier.padding(end = 8.dp))
+        // Problème de voix : bouton orange bien visible pour l'adulte, qui explique comment installer la voix
+        voiceWarning?.let { message ->
+            Button(
+                onClick = onVoiceFix,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6D00)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(message)
+            }
+        }
 
         // Ajouter : on choisit la zone (les colonnes n'ont pas de case « + » pour ne pas changer de disposition)
         Box {
@@ -1103,6 +1241,7 @@ fun AdminToolbar(
                 DropdownMenuItem(text = { Text("📤 Partager / Sauvegarder") }, onClick = { onMoreToggle(false); onBackup() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.btn_restore)) }, onClick = { onMoreToggle(false); onRestore() })
                 HorizontalDivider()
+                DropdownMenuItem(text = { Text("🗂 Sauvegardes automatiques…") }, onClick = { onMoreToggle(false); onAutoBackups() })
                 DropdownMenuItem(text = { Text("🧩 Grilles prêtes…") }, onClick = { onMoreToggle(false); onRecommendedLayout() })
                 onRestorePreviousLayout?.let { restore ->
                     DropdownMenuItem(text = { Text("↩ Revenir à la disposition précédente") }, onClick = { onMoreToggle(false); restore() })

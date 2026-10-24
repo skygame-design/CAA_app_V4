@@ -75,6 +75,59 @@ fun HideSystemBarsInDialog() {
 }
 
 /**
+ * Liste des sauvegardes automatiques (une par jour, 7 jours) avec un bouton pour revenir à l'une d'elles.
+ * Restaurer demande une confirmation ; la disposition actuelle reste récupérable (⋮ › Revenir à la disposition précédente).
+ */
+@Composable
+fun AutoBackupDialog(onDismiss: () -> Unit, onRestore: (NinaBackup) -> Unit) {
+    val context = LocalContext.current
+    var backups by remember { mutableStateOf<List<AutoBackupInfo>?>(null) }
+    var toConfirm by remember { mutableStateOf<AutoBackupInfo?>(null) }
+    LaunchedEffect(Unit) { backups = withContext(Dispatchers.IO) { AutoBackup.list(context) } }
+    val dayFormat = remember { java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH) }
+    val today = java.time.LocalDate.now()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = Color(0xFFF0F0F5),
+        title = { Text("🗂 Sauvegardes automatiques", fontWeight = FontWeight.Bold, fontSize = 22.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Nina enregistre la grille chaque jour d'utilisation, dans la tablette, et garde les ${AutoBackup.KEEP_DAYS} derniers jours. " +
+                    "Si la grille est abîmée, elle est récupérée automatiquement.",
+                    fontSize = 14.sp, color = Color.DarkGray
+                )
+                when (val list = backups) {
+                    null -> CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    else -> if (list.isEmpty()) Text("Aucune sauvegarde pour le moment.", color = Color.Gray)
+                    else list.forEach { info ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(12.dp)).padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                val label = if (info.date == today) "Aujourd'hui" else info.date.format(dayFormat).replaceFirstChar { it.uppercase() }
+                                Text(label, fontWeight = FontWeight.Bold)
+                                Text("${info.wordCount} mots", fontSize = 12.sp, color = Color.Gray)
+                            }
+                            if (toConfirm == info) {
+                                TextButton(onClick = { toConfirm = null }) { Text("Annuler") }
+                                Button(onClick = { AutoBackup.read(info.file)?.let(onRestore) }) { Text("Confirmer") }
+                            } else {
+                                OutlinedButton(onClick = { toConfirm = info }) { Text("Revenir à cette grille") }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fermer", color = Color(0xFF4A5D91)) } }
+    )
+}
+
+/**
  * Choix d'une grille prête (Premiers mots, Vocabulaire courant, Vocabulaire étendu), avec un aperçu :
  * mots de l'accueil dans leur disposition réelle, dossiers et nombre de mots, phrases rapides.
  */
@@ -1781,6 +1834,11 @@ private val helpTopics = listOf(
             ),
             HelpTip("Une fois la grille installée, évitez de changer le nombre de colonnes : l'enfant retient l'emplacement des mots."),
             HelpTip(
+                "Voix sans internet : si la voix française de la tablette a besoin d'internet, Nina serait muette sans Wi-Fi. " +
+                "Un point orange apparaît alors sur le cadenas, et un bouton orange dans la barre du mode adulte explique comment installer la voix (une seule fois).",
+                isNew = true
+            ),
+            HelpTip(
                 "Plein écran : Nina cache l'heure, la batterie et les boutons Android (‹ ○ |||) pour laisser toute la place aux pictos et éviter les appuis par erreur. " +
                 "Pour les faire réapparaître quelques secondes, glissez le doigt depuis le bord haut ou bas de l'écran ; ils se recachent seuls.",
                 isNew = true
@@ -1793,8 +1851,15 @@ private val helpTopics = listOf(
             HelpRows(
                 null, listOf(
                     "⋮ › Partager / Sauvegarder" to "crée un fichier avec la grille et les deux colonnes, à envoyer (Drive, mail…)",
-                    "⋮ › Restaurer" to "recharge un fichier de sauvegarde, y compris les anciennes"
+                    "⋮ › Restaurer" to "recharge un fichier de sauvegarde, y compris les anciennes",
+                    "⋮ › Sauvegardes automatiques" to "revenir à la grille d'un des 7 derniers jours, en cas de mauvaise manipulation. Nouveau"
                 )
+            ),
+            HelpTip(
+                "Sauvegarde automatique : chaque jour d'utilisation, Nina garde une copie de la grille dans la tablette (7 jours). " +
+                "Si la grille enregistrée est abîmée, Nina la récupère toute seule au démarrage et vous prévient. " +
+                "Ces copies restent dans la tablette : pour changer de tablette, utilisez toujours « Partager / Sauvegarder ».",
+                isNew = true
             ),
             HelpTip("Les images des banques (ARASAAC, Mulberry…) sont enregistrées dans la tablette et fonctionnent hors réseau. Sur une nouvelle tablette, elles sont retéléchargées automatiquement après la restauration (il faut du réseau une fois)."),
             HelpTip("Les photos de la galerie et les voix enregistrées restent sur la tablette : sur une nouvelle tablette, elles seront à refaire. Les statistiques ne sont pas dans la sauvegarde.")
