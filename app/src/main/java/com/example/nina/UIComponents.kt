@@ -203,7 +203,8 @@ fun AACCellView(
         }
     } else Modifier
 
-    // Modélisation : cadre orange qui clignote et case qui "respire" pour montrer où toucher
+    // Modélisation : cadre orange qui clignote pour montrer où toucher.
+    // Pas d'agrandissement : la case dépasserait des bords de la grille et serait rognée.
     val guideModifier = if (isGuided) {
         val transition = rememberInfiniteTransition(label = "guide")
         val pulse by transition.animateFloat(
@@ -211,9 +212,7 @@ fun AACCellView(
             animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
             label = "guidePulse"
         )
-        Modifier
-            .graphicsLayer(scaleX = 1f + pulse * 0.06f, scaleY = 1f + pulse * 0.06f)
-            .border(6.dp, Color(0xFFFF6D00).copy(alpha = 0.35f + pulse * 0.65f), RoundedCornerShape(16.dp))
+        Modifier.border(8.dp, Color(0xFFFF6D00).copy(alpha = 0.25f + pulse * 0.75f), RoundedCornerShape(16.dp))
     } else Modifier
 
     Box(
