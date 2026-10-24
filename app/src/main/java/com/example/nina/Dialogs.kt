@@ -1568,7 +1568,7 @@ private val helpTopics = listOf(
                 "Les zones de l'écran", listOf(
                     "Barre de phrase (en haut) : les mots choisis s'y alignent. Le bouton vert ▶, ou un appui sur la barre, lit la phrase.",
                     "Dossiers (colonne de gauche) : 🏠 Accueil toujours en haut (il dit « Accueil » et revient à la première page), puis les catégories (Actions, Nourriture…). Un toucher ouvre le dossier depuis n'importe où ; le dossier ouvert est encadré. S'il y a trop de dossiers, ▲ ▼ changent de page.",
-                    "Grille (au centre) : à l'accueil, les mots essentiels (moi, vouloir, encore, pas…) toujours à la même place ; dans un dossier, ses mots. Elle ne défile jamais : s'il y a trop de pictos, ◀ ▶ en bas changent de page et disent « Page suivante » ou « Page précédente ». Le bouton ← revient en arrière (sous-dossiers).",
+                    "Grille (au centre) : à l'accueil, les mots essentiels (moi, vouloir, encore, pas…) toujours à la même place ; dans un dossier, ses mots. Elle ne défile jamais : s'il y a trop de pictos, ◀ ▶ en bas changent de page et disent « Page suivante » ou « Page précédente ». Le bouton ← revient en arrière dans les sous-dossiers et dit « Retour ».",
                     "Phrases rapides (colonne de droite, éclair ⚡) : oui, non, bonjour, merci, toilettes… dites tout de suite, sans passer par la phrase.",
                     "Cadenas (petit, gris, en haut à droite) : à maintenir 2 secondes pour ouvrir le mode adulte."
                 )

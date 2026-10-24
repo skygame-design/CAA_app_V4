@@ -491,6 +491,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             IconButton(
                                                 onClick = {
                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    speakText("Retour", voicePitch, voiceRate)
                                                     navigationStack.removeAt(navigationStack.size - 1)
                                                 },
                                                 modifier = Modifier
@@ -1166,12 +1167,6 @@ private suspend fun updateCellsWithImages(context: Context, vararg lists: Mutabl
     lists.forEach { list ->
         list.forEachIndexed { i, original ->
             var cell = original
-            if (cell.imageUrl == "FETCH") {
-                try {
-                    val results = RetrofitInstance.arasaacApi.searchPictograms(cell.label.lowercase())
-                    if (results.isNotEmpty()) cell = cell.copy(imageUrl = PictoSearch.arasaacUrl(results.first()._id))
-                } catch (_: Exception) {}
-            }
             // Fichier local disparu (sauvegarde restaurée sur une autre tablette) : on repart de l'adresse d'origine
             val local = cell.imageUrl
             if (local != null && local.startsWith("/") && !java.io.File(local).exists() && cell.sourceUrl != null) {
@@ -1180,6 +1175,21 @@ private suspend fun updateCellsWithImages(context: Context, vararg lists: Mutabl
             if (isRemoteImage(cell.imageUrl)) {
                 val remote = cell.imageUrl!!
                 saveImageLocally(context, remote, "picto_${cell.id}")?.let { path -> cell = cell.copy(imageUrl = path, sourceUrl = remote) }
+            }
+            // Pas encore d'image, ou image ARASAAC introuvable (certains pictos de la recherche n'ont pas de fichier) :
+            // on essaie les résultats ARASAAC suivants pour ce mot, jusqu'à en trouver un qui se télécharge
+            val stillRemote = cell.imageUrl
+            if (stillRemote == "FETCH" || (stillRemote != null && stillRemote.startsWith("https://static.arasaac.org/"))) {
+                try {
+                    val candidates = RetrofitInstance.arasaacApi.searchPictograms(cell.label.lowercase())
+                        .map { PictoSearch.arasaacUrl(it._id) }
+                        .filter { it != stillRemote }
+                        .take(5)
+                    for (url in candidates) {
+                        val path = saveImageLocally(context, url, "picto_${cell.id}")
+                        if (path != null) { cell = cell.copy(imageUrl = path, sourceUrl = url); break }
+                    }
+                } catch (_: Exception) {} // Pas de réseau : on réessaiera au prochain démarrage
             }
             if (cell !== original && i < list.size && list[i].id == original.id) list[i] = cell
             if (cell.isFolder) updateCellsWithImages(context, cell.content)
