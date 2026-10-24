@@ -1566,6 +1566,31 @@ private val helpTopics = listOf(
         )
     ),
     HelpTopic(
+        Icons.Default.GridView, "Grilles prêtes", "Installer un vocabulaire complet", isNew = true,
+        blocks = listOf(
+            HelpText("Plutôt que de créer chaque picto à la main, installez une grille déjà remplie : mots essentiels à l'accueil, dossiers thématiques à gauche et phrases rapides à droite. Elle sert de point de départ, que vous adaptez ensuite."),
+            HelpSteps(
+                "Installer une grille", listOf(
+                    "Ouvrez le mode adulte (maintenir le cadenas 2 secondes, puis le calcul).",
+                    "Dans la barre jaune, touchez ⋮ puis « Grilles prêtes… ».",
+                    "Choisissez un niveau à gauche : l'aperçu à droite montre l'accueil, chaque dossier et les phrases rapides.",
+                    "Touchez « Installer ». La grille, les dossiers, les phrases rapides et la taille de grille sont réglés d'un coup.",
+                    "Les images se téléchargent dans la tablette (il faut du réseau une fois), puis tout fonctionne hors ligne."
+                )
+            ),
+            HelpRows(
+                "Les trois niveaux", listOf(
+                    "Premiers mots" to "débutant — 51 mots, 12 à l'accueil, 5 petits dossiers, 4 pictos par rangée",
+                    "Vocabulaire courant" to "intermédiaire — 95 mots, 20 à l'accueil, 6 dossiers dont Jeux, 5 par rangée ; ajoute J'ai mal et Stop",
+                    "Vocabulaire étendu" to "avancé — 149 mots, 30 à l'accueil avec les questions (quoi, où, qui, quand, pourquoi), sous-dossiers, 6 par rangée"
+                )
+            ),
+            HelpText("À l'accueil se trouvent les mots les plus employés par les enfants (moi, vouloir, encore, fini, pas…), rangés par couleur dans l'ordre de la phrase. D'un niveau à l'autre, chaque mot garde exactement sa place : les nouveaux mots s'ajoutent à droite et en bas. L'enfant peut donc passer au niveau suivant sans réapprendre ses gestes."),
+            HelpTip("Installer une grille remplace tous les pictos actuels. Votre disposition est gardée : ⋮ › « Revenir à la disposition précédente » la remet en place. Pour garder une copie durable, faites aussi ⋮ › « Partager / Sauvegarder » avant."),
+            HelpTip("Ces listes sont un point de départ, pas un vocabulaire validé pour un enfant précis. Montrez-les à l'orthophoniste, puis adaptez-les : glisser-déposer, mode Édition, ajout de photos de la famille et des objets de la maison.")
+        )
+    ),
+    HelpTopic(
         Icons.Default.RecordVoiceOver, "Construire une phrase", "Barre de phrase et grammaire",
         blocks = listOf(
             HelpSteps(
