@@ -1441,7 +1441,7 @@ private val helpTopics = listOf(
                     "Mots essentiels (colonne de gauche) : les mots les plus utiles, toujours visibles.",
                     "Grille (au centre) : le vocabulaire, rangé en dossiers. Elle ne défile jamais ; s'il y a trop de pictos, les boutons ◀ ▶ en bas changent de page. Le bouton ← revient en arrière.",
                     "Phrases rapides (colonne de droite, éclair ⚡) : dites tout de suite, sans passer par la phrase.",
-                    "Cadenas (en haut à droite) : ouvre le mode adulte pour personnaliser."
+                    "Cadenas (petit, gris, en haut à droite) : à maintenir 2 secondes pour ouvrir le mode adulte."
                 )
             ),
             HelpTip("À droite de la barre de phrase, la loupe 🔍 cherche un mot et peut montrer où il se trouve ; le clavier ⌨ permet d'écrire un mot qui n'a pas de picto.")
@@ -1522,25 +1522,25 @@ private val helpTopics = listOf(
         )
     ),
     HelpTopic(
-        Icons.Default.Lock, "Mode adulte", "Cadenas, menu, déplacer les pictos",
+        Icons.Default.Lock, "Mode adulte", "Cadenas, barre d'outils, déplacer",
         blocks = listOf(
             HelpSteps(
                 "Ouvrir le mode adulte", listOf(
-                    "Touche le cadenas vert.",
+                    "Maintiens le petit cadenas gris (en haut à droite) pendant 2 secondes : un anneau se remplit. Un simple appui ne fait rien, pour que l'enfant ne l'ouvre pas par hasard.",
                     "Résous le petit calcul (par exemple 3 + 4).",
-                    "Le cadenas devient jaune : le menu ⋮, le réglage de grille et les boutons + apparaissent."
+                    "Une barre jaune « Mode adulte » apparaît en haut de l'écran, avec tous les outils. Les boutons + apparaissent au bas des colonnes."
                 )
             ),
             HelpRows(
-                "Le menu ⋮", listOf(
-                    "Paramètres" to "couleurs, voix, réglages tactiles",
-                    "Aide & Tutoriel" to "cette aide",
-                    "Calibrer le tactile" to "corrige un appui toujours décalé",
-                    "Statistiques" to "suivi de l'utilisation",
+                "La barre du mode adulte", listOf(
                     "Ajouter" to "créer un picto dans la grille",
-                    "Édition" to "modifier les pictos (un crayon apparaît)",
-                    "Mode Kiosque" to "bloquer la tablette sur Nina",
-                    "Partager / Restaurer" to "sauvegarder ou recharger la grille"
+                    "Édition" to "modifier les pictos (un crayon apparaît) ; le bouton reste foncé tant que l'édition est active",
+                    "Paramètres" to "couleurs, voix, réglages tactiles",
+                    "Statistiques" to "suivi de l'utilisation",
+                    "Aide" to "cette aide",
+                    "− 4 par rangée +" to "taille de la grille, de 1 à 8 pictos par rangée",
+                    "⋮" to "calibrer le tactile, mode Kiosque, partager / restaurer la sauvegarde",
+                    "Verrouiller" to "referme le mode adulte (l'édition s'arrête aussi)"
                 )
             ),
             HelpSteps(
@@ -1560,17 +1560,17 @@ private val helpTopics = listOf(
         blocks = listOf(
             HelpSteps(
                 "Ajouter un picto", listOf(
-                    "Menu ⋮ › Ajouter, ou le bouton + au bas d'une colonne.",
+                    "Barre du mode adulte › Ajouter, ou le bouton + au bas d'une colonne.",
                     "Choisis un texte, une image (recherche ARASAAC ou photo de la galerie) et une couleur.",
                     "Touche « Créer »."
                 )
             ),
             HelpSteps(
                 "Modifier un picto", listOf(
-                    "Menu ⋮ › Édition : un crayon apparaît sur chaque picto.",
+                    "Barre du mode adulte › Édition : un crayon apparaît sur chaque picto.",
                     "Touche le picto à modifier.",
                     "Onglets : Apparence, Audio, Dossier, Suppression.",
-                    "Touche « Enregistrer les modifications ». Menu ⋮ › Quitter l'édition pour finir."
+                    "Touche « Enregistrer les modifications ». Touche à nouveau « Édition » pour finir."
                 )
             ),
             HelpRows(
@@ -1614,10 +1614,10 @@ private val helpTopics = listOf(
                 )
             ),
             HelpRows(
-                "Ailleurs en mode adulte", listOf(
-                    "Taille de grille" to "flèches ▲▼ sous le menu : de 1 à 8 pictos par rangée. La grille remplit l'écran sans défiler ; s'il y a trop de pictos, des pages ◀ ▶ apparaissent. Nouveau",
-                    "Calibrer le tactile" to "attraper 5 fois la coccinelle : l'écran se décale pour compenser",
-                    "Mode Kiosque" to "empêche de quitter Nina par erreur"
+                "Dans la barre du mode adulte", listOf(
+                    "Taille de grille" to "boutons − et + de la barre du mode adulte : de 1 à 8 pictos par rangée. La grille remplit l'écran sans défiler ; s'il y a trop de pictos, des pages ◀ ▶ apparaissent. Nouveau",
+                    "⋮ › Calibrer le tactile" to "attraper 5 fois la coccinelle : l'écran se décale pour compenser",
+                    "⋮ › Mode Kiosque" to "empêche de quitter Nina par erreur"
                 )
             ),
             HelpTip("Une fois la grille installée, évitez de changer le nombre de colonnes : l'enfant retient l'emplacement des mots.")
@@ -1628,8 +1628,8 @@ private val helpTopics = listOf(
         blocks = listOf(
             HelpRows(
                 null, listOf(
-                    "Partager / Sauvegarder" to "crée un fichier avec la grille et les deux colonnes, à envoyer (Drive, mail…)",
-                    "Restaurer" to "recharge un fichier de sauvegarde, y compris les anciennes"
+                    "⋮ › Partager / Sauvegarder" to "crée un fichier avec la grille et les deux colonnes, à envoyer (Drive, mail…)",
+                    "⋮ › Restaurer" to "recharge un fichier de sauvegarde, y compris les anciennes"
                 )
             ),
             HelpTip("Les photos de la galerie et les voix enregistrées restent sur la tablette : sur une nouvelle tablette, elles seront à refaire. Les statistiques ne sont pas dans la sauvegarde.")
@@ -1840,7 +1840,7 @@ private fun ScreenMap() {
                 }
             }
             Column(modifier = Modifier.width(110.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Zone("🔒 Cadenas", 0xFFFFF59D, Modifier.fillMaxWidth().height(50.dp))
+                Zone("🔒 maintenir", 0xFFE0E0E0, Modifier.fillMaxWidth().height(50.dp))
                 Zone("⚡ Phrases\nrapides", 0xFFBBDEFB, Modifier.fillMaxWidth().weight(1f))
             }
         }

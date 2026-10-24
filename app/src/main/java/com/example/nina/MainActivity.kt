@@ -22,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -47,7 +48,7 @@ import java.util.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -331,6 +332,37 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             .then(rootModifier),
                         color = if (isCviMode) Color.Black else Color(backgroundColor)
                     ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                        // --- BARRE DU MODE ADULTE (visible seulement cadenas ouvert, hors de la zone de l'enfant) ---
+                        if (isAdminMode) {
+                            AdminToolbar(
+                                showMore = showMenu,
+                                onMoreToggle = { showMenu = it },
+                                isEditMode = isEditMode,
+                                onEditModeToggle = { isEditMode = it },
+                                columnCount = columnCount,
+                                onColumnCountChange = {
+                                    columnCount = it
+                                    context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit().putInt("column_count", it).apply()
+                                },
+                                onAdd = { showAddDialog = true },
+                                onSettings = { showSettingsDialog = true },
+                                onStats = { showStatsDialog = true },
+                                onHelp = { showHelpDialog = true },
+                                onCalibration = { showCalibration = true },
+                                isKioskMode = isKioskMode,
+                                onKioskToggle = {
+                                    activity?.let { act ->
+                                        if (isKioskMode) { act.stopLockTask(); isKioskMode = false }
+                                        else { act.startLockTask(); isKioskMode = true }
+                                    }
+                                },
+                                onBackup = { shareBackupFile(context, NinaBackup(boutons, coreWords, quickFires)) },
+                                onRestore = { openDocLauncher.launch(arrayOf("application/json")) },
+                                onLock = { isAdminMode = false; isEditMode = false }, // On coupe l'édition au verrouillage
+                                modifier = Modifier.zIndex(1f) // Par-dessus la barre de phrase : la grille ne change pas de taille
+                            )
+                        }
                         Row(modifier = Modifier.fillMaxSize()) {
 
                             // 1. COLONNE PRINCIPALE (Barre supérieure + Grille)
@@ -575,50 +607,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                                // Bouton de verrouillage Admin
-                                FloatingActionButton(
-                                    onClick = {
-                                        if (isAdminMode) {
-                                            isAdminMode = false
-                                            isEditMode = false // On coupe l'édition d'urgence au verrouillage
-                                            android.util.Log.d("Nina-Debug", "🔒 Cadenas fermé -> Mode Édition forcé à FALSE")
-                                        } else {
-                                            showAdminChallengeDialog = true
-                                        }
-                                    },
-                                    shape = CircleShape,
-                                    containerColor = if (isAdminMode) Color(0xFFFFEB3B) else Color(0xFF4CAF50)
-                                ) { Icon(if (isAdminMode) Icons.Default.LockOpen else Icons.Default.Lock, null) }
+                                // Cadenas discret : il faut le maintenir 2 s pour ouvrir le mode adulte
+                                HoldLockButton(
+                                    isAdminMode = isAdminMode,
+                                    onHoldComplete = { showAdminChallengeDialog = true },
+                                    onLock = { isAdminMode = false; isEditMode = false }
+                                )
 
-                                if (isAdminMode) {
-                                    AdminMenu(
-                                        showMenu = showMenu,
-                                        onMenuToggle = { showMenu = it },
-                                        onSettings = { showSettingsDialog = true },
-                                        onHelp = { showHelpDialog = true },
-                                        onCalibration = { showCalibration = true },
-                                        onStats = { showStatsDialog = true },
-                                        onAdd = { showAddDialog = true },
-                                        onKioskToggle = { 
-                                            activity?.let { act ->
-                                                if (isKioskMode) { act.stopLockTask(); isKioskMode = false }
-                                                else { act.startLockTask(); isKioskMode = true }
-                                            }
-                                        },
-                                        isKioskMode = isKioskMode,
-                                        isEditMode = isEditMode,
-                                        onEditModeToggle = { isEditMode = it },
-                                        onBackup = { shareBackupFile(context, NinaBackup(boutons, coreWords, quickFires)) },
-                                        onRestore = { openDocLauncher.launch(arrayOf("application/json")) }
-                                    )
-                                    // Contrôleur de taille de grille
-                                    GridSizeSelector(columnCount, {
-                                        columnCount = it
-                                        context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit().putInt("column_count", it).apply()
-                                    })
-                                }
-
-                                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                                 // Zone Quick Fires (Phrases rapides)
                                 Column(
@@ -665,6 +661,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     }
                                 }
                             }
+                        }
                         }
                     }
 
@@ -894,46 +891,140 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
 // --- SOUS-COMPOSANTS DÉPORTÉS (Pour lisibilité) ---
 
+/**
+ * Cadenas discret en haut à droite : petit, gris, sans couleur vive pour ne pas attirer l'enfant.
+ * Il faut le maintenir 2 secondes (un anneau se remplit) pour ouvrir le calcul du mode adulte.
+ * Un simple appui affiche seulement « Maintenir 2 s ». Cadenas ouvert, un appui le referme.
+ */
 @Composable
-fun AdminMenu(
-    showMenu: Boolean, onMenuToggle: (Boolean) -> Unit, onSettings: () -> Unit, onHelp: () -> Unit,
-    onCalibration: () -> Unit, onStats: () -> Unit, onAdd: () -> Unit, onKioskToggle: () -> Unit,
-    isKioskMode: Boolean, isEditMode: Boolean, onEditModeToggle: (Boolean) -> Unit, onBackup: () -> Unit, onRestore: () -> Unit
-) {
-    Box {
-        IconButton(onClick = { onMenuToggle(true) }, modifier = Modifier.size(60.dp).background(Color.White, CircleShape).border(1.dp, Color.Gray, CircleShape)) 
-        { Icon(Icons.Default.MoreVert, null) }
-        DropdownMenu(expanded = showMenu, onDismissRequest = { onMenuToggle(false) }) {
-            DropdownMenuItem(text = { Text("⚙️ Paramètres") }, onClick = { onMenuToggle(false); onSettings() })
-            DropdownMenuItem(text = { Text("❓ Aide & Tutoriel") }, onClick = { onMenuToggle(false); onHelp() })
-            DropdownMenuItem(text = { Text("🎯 Calibrer le tactile") }, onClick = { onMenuToggle(false); onCalibration() })
-            DropdownMenuItem(text = { Text("📊 Statistiques") }, onClick = { onMenuToggle(false); onStats() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.btn_add)) }, leadingIcon = { Icon(Icons.Default.Add, null, tint = Color(0xFF4CAF50)) }, onClick = { onMenuToggle(false); onAdd() })
-            DropdownMenuItem(
-                text = { Text(if (isEditMode) "Quitter l'édition" else "Édition") },
-                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                onClick = { 
-                    onMenuToggle(false)
-                    onEditModeToggle(!isEditMode)
-                    Log.d("Nina-Debug", "🛠️ MODE ÉDITION CHANGÉ : ${!isEditMode}")
+fun HoldLockButton(isAdminMode: Boolean, onHoldComplete: () -> Unit, onLock: () -> Unit) {
+    if (isAdminMode) {
+        IconButton(onClick = onLock, modifier = Modifier.size(48.dp).background(Color(0xFFFFEB3B), CircleShape)) {
+            Icon(Icons.Default.LockOpen, contentDescription = "Verrouiller")
+        }
+        return
+    }
+
+    val scope = rememberCoroutineScope()
+    val progress = remember { androidx.compose.animation.core.Animatable(0f) }
+    var showHint by remember { mutableStateOf(false) }
+    LaunchedEffect(showHint) { if (showHint) { kotlinx.coroutines.delay(2000); showHint = false } }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(48.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures(onPress = {
+                        val hold = scope.launch {
+                            progress.snapTo(0f)
+                            progress.animateTo(1f, androidx.compose.animation.core.tween(2000, easing = androidx.compose.animation.core.LinearEasing))
+                            onHoldComplete()
+                            progress.snapTo(0f)
+                        }
+                        tryAwaitRelease()
+                        if (hold.isActive) {
+                            // Relâché trop tôt : on n'ouvre rien
+                            hold.cancel()
+                            scope.launch { progress.snapTo(0f) }
+                            showHint = true
+                        }
+                    })
                 }
+        ) {
+            CircularProgressIndicator(
+                progress = { progress.value },
+                modifier = Modifier.fillMaxSize(),
+                color = Color(0xFF4A5D91),
+                trackColor = Color.Transparent,
+                strokeWidth = 4.dp
             )
-            HorizontalDivider()
-            DropdownMenuItem(text = { Text(if (isKioskMode) "🔓 Désactiver Kiosque" else "🔒 Activer Mode Kiosque") }, onClick = { onMenuToggle(false); onKioskToggle() })
-            DropdownMenuItem(text = { Text("📤 Partager / Sauvegarder") }, onClick = { onMenuToggle(false); onBackup() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.btn_restore)) }, onClick = { onMenuToggle(false); onRestore() })
+            Icon(Icons.Default.Lock, contentDescription = "Mode adulte (maintenir 2 secondes)", tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(22.dp))
+        }
+        if (showHint) Text("Maintenir 2 s", fontSize = 11.sp, color = Color.Gray)
+    }
+}
+
+/**
+ * Barre du mode adulte, en haut de l'écran : tous les outils au même endroit,
+ * sans pousser les phrases rapides de la colonne de droite.
+ */
+@Composable
+fun AdminToolbar(
+    showMore: Boolean, onMoreToggle: (Boolean) -> Unit,
+    isEditMode: Boolean, onEditModeToggle: (Boolean) -> Unit,
+    columnCount: Int, onColumnCountChange: (Int) -> Unit,
+    onAdd: () -> Unit, onSettings: () -> Unit, onStats: () -> Unit, onHelp: () -> Unit,
+    onCalibration: () -> Unit, isKioskMode: Boolean, onKioskToggle: () -> Unit,
+    onBackup: () -> Unit, onRestore: () -> Unit, onLock: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val accent = Color(0xFF4A5D91)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFFF3C4))
+            .statusBarsPadding() // Ne pas passer sous l'heure et la batterie d'Android
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(Icons.Default.LockOpen, contentDescription = null, tint = Color(0xFF8D6E00))
+        Text("Mode adulte", fontWeight = FontWeight.Bold, color = Color(0xFF5D4600), modifier = Modifier.padding(end = 8.dp))
+
+        AdminToolButton(Icons.Default.Add, "Ajouter", onAdd)
+        AdminToolButton(Icons.Default.Edit, if (isEditMode) "Édition : oui" else "Édition", { onEditModeToggle(!isEditMode) }, selected = isEditMode)
+        AdminToolButton(Icons.Default.Settings, "Paramètres", onSettings)
+        AdminToolButton(Icons.Default.BarChart, "Statistiques", onStats)
+        AdminToolButton(Icons.AutoMirrored.Filled.Help, "Aide", onHelp)
+
+        // Taille de la grille : pictos par rangée (1 à 8)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.background(Color.White, RoundedCornerShape(20.dp)).padding(horizontal = 4.dp)
+        ) {
+            IconButton(onClick = { if (columnCount > 1) onColumnCountChange(columnCount - 1) }, enabled = columnCount > 1) {
+                Icon(Icons.Default.Remove, contentDescription = "Moins de pictos par rangée")
+            }
+            Text("$columnCount par rangée", fontWeight = FontWeight.Bold, color = accent)
+            IconButton(onClick = { if (columnCount < 8) onColumnCountChange(columnCount + 1) }, enabled = columnCount < 8) {
+                Icon(Icons.Default.Add, contentDescription = "Plus de pictos par rangée")
+            }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Outils plus rares
+        Box {
+            IconButton(onClick = { onMoreToggle(true) }) { Icon(Icons.Default.MoreVert, contentDescription = "Plus d'outils") }
+            DropdownMenu(expanded = showMore, onDismissRequest = { onMoreToggle(false) }) {
+                DropdownMenuItem(text = { Text("🎯 Calibrer le tactile") }, onClick = { onMoreToggle(false); onCalibration() })
+                DropdownMenuItem(text = { Text(if (isKioskMode) "🔓 Désactiver le mode Kiosque" else "🔒 Activer le mode Kiosque") }, onClick = { onMoreToggle(false); onKioskToggle() })
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("📤 Partager / Sauvegarder") }, onClick = { onMoreToggle(false); onBackup() })
+                DropdownMenuItem(text = { Text(stringResource(R.string.btn_restore)) }, onClick = { onMoreToggle(false); onRestore() })
+            }
+        }
+
+        Button(onClick = onLock, colors = ButtonDefaults.buttonColors(containerColor = accent)) {
+            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Verrouiller")
         }
     }
 }
 
 @Composable
-fun GridSizeSelector(current: Int, onUpdate: (Int) -> Unit) {
-    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
-            IconButton(onClick = { if (current < 8) onUpdate(current + 1) }) { Icon(Icons.Default.KeyboardArrowUp, null) }
-            Text("$current", fontWeight = FontWeight.Black)
-            IconButton(onClick = { if (current > 1) onUpdate(current - 1) }) { Icon(Icons.Default.KeyboardArrowDown, null) }
-        }
+private fun AdminToolButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, selected: Boolean = false) {
+    FilledTonalButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        colors = ButtonDefaults.filledTonalButtonColors(containerColor = if (selected) Color(0xFF4A5D91) else Color.White, contentColor = if (selected) Color.White else Color(0xFF4A5D91))
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(label)
     }
 }
 
