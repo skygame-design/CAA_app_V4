@@ -374,7 +374,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             .then(rootModifier),
                         color = if (isCviMode) Color.Black else Color(backgroundColor)
                     ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
+                        // Depuis Android 15, l'app est dessinée sous les barres système : on réserve leur place
+                        // (barre d'état en haut, barre de navigation à 3 boutons en bas ou sur le côté, encoche)
+                        // pour qu'elles ne cachent aucun bouton. Le fond de couleur, lui, va jusqu'aux bords.
+                        Box(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
                         // --- BARRE DU MODE ADULTE (visible seulement cadenas ouvert, hors de la zone de l'enfant) ---
                         if (isAdminMode) {
                             AdminToolbar(
@@ -1035,7 +1038,6 @@ fun AdminToolbar(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFFFFF3C4))
-            .statusBarsPadding() // Ne pas passer sous l'heure et la batterie d'Android
             .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
