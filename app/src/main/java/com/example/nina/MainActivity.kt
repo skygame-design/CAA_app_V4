@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nina.ui.theme.NinaTheme
 import com.google.gson.reflect.TypeToken
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -350,6 +351,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                 val texteBrut = phrase.joinToString(" ") { it.label }
                                                 val texteFinal = LocalGrammarEngine.refine(texteBrut)
                                                 speakText(texteFinal, voicePitch, voiceRate)
+                                                logUsage(UsageType.SENTENCE, texteFinal)
                                             }
                                         },
                                         enabled = phrase.isNotEmpty(),
@@ -710,7 +712,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             showWordFinder = false
                         },
                         onWordFinderDismiss = { showWordFinder = false },
-                        showStats = showStatsDialog, usageStats = usageStats, onStatsDismiss = { showStatsDialog = false }, onStatsReset = { usageStats = emptyMap(); saveStats(context, emptyMap()) },
+                        showStats = showStatsDialog, usageStats = usageStats, onStatsDismiss = { showStatsDialog = false }, onStatsReset = {
+                            usageStats = emptyMap(); saveStats(context, emptyMap())
+                            scope.launch(Dispatchers.IO) { UsageLog.clear(context) }
+                        },
                         showEditDialog = showEditDialog, cellToEdit = cellToEdit, allButtons = boutons,
                         onEditDelete = { targetCell ->
                             if (coreWords.removeAll { it.id == targetCell.id }) saveCoreWords(coreWords)
@@ -780,7 +785,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             stats[cell.label] = (stats[cell.label] ?: 0) + 1
             saveStats(context, stats)
             onUpdate(stats)
+            logUsage(UsageType.WORD, cell.label)
         }
+    }
+
+    /** Ajoute une ligne datée au journal d'utilisation, sans bloquer l'interface. */
+    private fun logUsage(type: UsageType, text: String) {
+        val time = java.time.LocalDateTime.now()
+        lifecycleScope.launch(Dispatchers.IO) { UsageLog.append(applicationContext, type, text, time) }
     }
 
     private fun saveButtons(list: List<AACCell>) {
