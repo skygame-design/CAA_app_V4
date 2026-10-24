@@ -40,10 +40,6 @@ android {
     buildFeatures {
         compose = true
     }
-
-    androidResources {
-        noCompress += "tflite"
-    }
 }
 
 dependencies {
@@ -64,8 +60,6 @@ dependencies {
 
     // --- ICONES ---
     implementation("androidx.compose.material:material-icons-extended")
-
-    // --- IA ET NLP ---
 
     // --- TESTS ---
     testImplementation(libs.junit)

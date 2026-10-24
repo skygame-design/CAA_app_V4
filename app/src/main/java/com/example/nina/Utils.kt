@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import com.google.gson.Gson
+import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import java.io.File
 import java.io.FileOutputStream
@@ -57,6 +58,30 @@ fun saveImageLocally(context: Context, urlString: String, name: String): String?
         file.absolutePath
     } catch (_: Exception) {
         null
+    }
+}
+
+/**
+ * Contenu complet d'un fichier de sauvegarde : grille, Core Words et Quick Fires.
+ * coreWords et quickFires sont null pour les anciennes sauvegardes (grille seule).
+ */
+data class NinaBackup(
+    val buttons: List<AACCell>,
+    val coreWords: List<AACCell>? = null,
+    val quickFires: List<AACCell>? = null
+)
+
+/**
+ * Lit un fichier de sauvegarde. Accepte le nouveau format (objet NinaBackup)
+ * et l'ancien format (simple liste des boutons de la grille).
+ */
+fun parseBackup(json: String): NinaBackup {
+    val root = JsonParser.parseString(json)
+    return if (root.isJsonArray) {
+        val buttons: List<AACCell> = GsonInstance.gson.fromJson(root, object : TypeToken<List<AACCell>>() {}.type)
+        NinaBackup(buttons)
+    } else {
+        GsonInstance.gson.fromJson(root, NinaBackup::class.java)
     }
 }
 

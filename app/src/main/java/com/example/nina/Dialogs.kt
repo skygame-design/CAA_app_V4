@@ -308,12 +308,10 @@ fun EditDialog(
     cell: AACCell,
     allCells: List<AACCell>,
     onDelete: (AACCell) -> Unit,
-    onSave: (AACCell, String, Long, String?, String?, Boolean, Boolean, Boolean) -> Unit,
-    onMoveInList: (AACCell, Int) -> Unit,
-    onMoveToFolder: (AACCell, AACCell?) -> Unit,
+    // Les deux derniers paramètres : déplacement demandé, et dossier cible (null = Racine)
+    onSave: (AACCell, String, Long, String?, String?, Boolean, Boolean, Boolean, Boolean, AACCell?) -> Unit,
     onDismiss: () -> Unit
 ) {
-    onMoveInList(cell, 0) // Appel factice
     val context = LocalContext.current
     var name by remember { mutableStateOf(cell.label) }
     var imageUrl by remember { mutableStateOf(cell.imageUrl) }
@@ -722,10 +720,7 @@ fun EditDialog(
                     Box(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         Button(
                             onClick = {
-                                onSave(cell, name, color, imageUrl, audioPath, isFolder, isQuickPhrase, isHidden)
-                                if (isMoveRequested) {
-                                    onMoveToFolder(cell, pendingFolderMove)
-                                }
+                                onSave(cell, name, color, imageUrl, audioPath, isFolder, isQuickPhrase, isHidden, isMoveRequested, pendingFolderMove)
                                 onDismiss()
                             },
                             modifier = Modifier.fillMaxWidth().height(56.dp),
