@@ -63,6 +63,18 @@ fun SettingsSectionTitle(title: String) {
 }
 
 /**
+ * Les fenêtres plein écran (aide, création de picto…) ont leur propre fenêtre Android :
+ * sans cela, la barre d'état et la barre de navigation réapparaissent quand elles s'ouvrent.
+ */
+@Composable
+fun HideSystemBarsInDialog() {
+    val view = androidx.compose.ui.platform.LocalView.current
+    SideEffect {
+        (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let { hideSystemBars(it) }
+    }
+}
+
+/**
  * Choix d'une grille prête (Premiers mots, Vocabulaire courant, Vocabulaire étendu), avec un aperçu :
  * mots de l'accueil dans leur disposition réelle, dossiers et nombre de mots, phrases rapides.
  */
@@ -74,6 +86,7 @@ fun VocabularyPackDialog(currentColumns: Int, onDismiss: () -> Unit, onApply: (V
     val accent = Color(0xFF4A5D91)
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        HideSystemBarsInDialog()
         Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF0F0F5)) {
             Column(modifier = Modifier.systemBarsPadding()) {
                 TopAppBar(
@@ -344,10 +357,11 @@ fun AddButtonDialog(onDismiss: () -> Unit, onConfirm: (AACCell) -> Unit) {
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
+        HideSystemBarsInDialog()
         Surface(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().imePadding(), // Laisse la place au clavier
             color = MaterialTheme.colorScheme.background
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -576,9 +590,11 @@ fun EditDialog(
 
     var selectedTab by remember { mutableStateOf(EditTab.APPARENCE) }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        HideSystemBarsInDialog()
         Surface(
             modifier = Modifier
+                .imePadding() // Laisse la place au clavier
                 .fillMaxWidth(0.9f)
                 .fillMaxHeight(0.9f)
                 .clip(RoundedCornerShape(24.dp)),
@@ -1763,7 +1779,12 @@ private val helpTopics = listOf(
                     "⋮ › Mode Kiosque" to "empêche de quitter Nina par erreur"
                 )
             ),
-            HelpTip("Une fois la grille installée, évitez de changer le nombre de colonnes : l'enfant retient l'emplacement des mots.")
+            HelpTip("Une fois la grille installée, évitez de changer le nombre de colonnes : l'enfant retient l'emplacement des mots."),
+            HelpTip(
+                "Plein écran : Nina cache l'heure, la batterie et les boutons Android (‹ ○ |||) pour laisser toute la place aux pictos et éviter les appuis par erreur. " +
+                "Pour les faire réapparaître quelques secondes, glissez le doigt depuis le bord haut ou bas de l'écran ; ils se recachent seuls.",
+                isNew = true
+            )
         )
     ),
     HelpTopic(
@@ -1813,6 +1834,7 @@ fun HelpDialog(onDismiss: () -> Unit) {
 
     // decorFitsSystemWindows = false : la fenêtre couvre tout l'écran (sinon une bande de l'appli reste visible en bas)
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        HideSystemBarsInDialog()
         Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF0F0F5)) {
             Column(modifier = Modifier.systemBarsPadding()) {
                 TopAppBar(

@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import com.example.nina.ui.theme.NinaTheme
 import com.google.gson.reflect.TypeToken
 import androidx.lifecycle.lifecycleScope
+import androidx.core.view.WindowCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -72,6 +73,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         coil.Coil.setImageLoader(
             coil.ImageLoader.Builder(this).components { add(coil.decode.SvgDecoder.Factory()) }.build()
         )
+
+        // Plein écran : l'app occupe tout l'écran, sans barre d'état ni barre de navigation
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        hideSystemBars(window)
 
         // Initialisation de la synthèse vocale
         tts = TextToSpeech(this, this)
@@ -947,6 +952,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             }
             context.startActivity(android.content.Intent.createChooser(intent, "Sauvegarder la grille de Nina via :"))
         } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    // Android réaffiche les barres après certaines actions (notification, retour dans l'app…) : on les remasque
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars(window)
     }
 
     override fun onDestroy() {

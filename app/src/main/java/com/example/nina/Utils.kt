@@ -24,6 +24,19 @@ object GsonInstance {
 }
 
 /**
+ * Plein écran « immersif » : cache la barre d'état (heure, batterie) et la barre de navigation.
+ * Un glissement depuis le bord de l'écran les fait réapparaître quelques secondes, par-dessus l'app,
+ * sans déplacer les pictos ; elles se recachent ensuite seules.
+ * À appeler pour l'activité et pour chaque fenêtre de dialogue (sinon les barres reviennent quand elle s'ouvre).
+ */
+fun hideSystemBars(window: android.view.Window) {
+    androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+        systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+    }
+}
+
+/**
  * Sauvegarde une image depuis un URI vers le stockage interne.
  */
 fun saveImageToInternalStorage(context: Context, uri: Uri): String? {
