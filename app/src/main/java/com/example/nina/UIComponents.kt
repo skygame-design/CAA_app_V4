@@ -308,6 +308,7 @@ fun PagedGrid(
     onLayout: (GridLayout) -> Unit,
     onPagerBounds: (previous: Rect, next: Rect) -> Unit,
     modifier: Modifier = Modifier,
+    onSpeak: (String) -> Unit = {}, // Lecture vocale des boutons de page
     cellContent: @Composable (cell: AACCell, modifier: Modifier) -> Unit
 ) {
     val gap = 16.dp
@@ -345,7 +346,7 @@ fun PagedGrid(
                     PageButton(
                         forward = false, enabled = currentPage > 0,
                         modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { previousBounds = it.boundsInRoot() }
-                    ) { onPageChange(currentPage - 1) }
+                    ) { onPageChange(currentPage - 1); onSpeak("Page précédente") }
                     Text(
                         "Page ${currentPage + 1} / ${layout.pageCount}",
                         fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4A5D91),
@@ -354,7 +355,7 @@ fun PagedGrid(
                     PageButton(
                         forward = true, enabled = currentPage < layout.pageCount - 1,
                         modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { nextBounds = it.boundsInRoot() }
-                    ) { onPageChange(currentPage + 1) }
+                    ) { onPageChange(currentPage + 1); onSpeak("Page suivante") }
                 }
             }
         }
@@ -402,6 +403,7 @@ fun PagedColumn(
     onLayout: (GridLayout) -> Unit,
     onPagerBounds: (previous: Rect, next: Rect) -> Unit,
     modifier: Modifier = Modifier,
+    onSpeak: (String) -> Unit = {}, // Lecture vocale des boutons de page
     minItemHeight: Dp = 80.dp,
     gap: Dp = 12.dp,
     item: @Composable (index: Int, modifier: Modifier) -> Unit
@@ -427,10 +429,10 @@ fun PagedColumn(
                 Row(modifier = Modifier.fillMaxWidth().height(pagerHeight), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     ColumnPageButton(up = true, enabled = currentPage > 0,
                         modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { previousBounds = it.boundsInRoot() }
-                    ) { onPageChange(currentPage - 1) }
+                    ) { onPageChange(currentPage - 1); onSpeak("Page précédente") }
                     ColumnPageButton(up = false, enabled = currentPage < layout.pageCount - 1,
                         modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { nextBounds = it.boundsInRoot() }
-                    ) { onPageChange(currentPage + 1) }
+                    ) { onPageChange(currentPage + 1); onSpeak("Page suivante") }
                 }
             }
         }

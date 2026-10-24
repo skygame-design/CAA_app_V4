@@ -552,7 +552,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             isGuided = false,
                                             onClick = {
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                speakText("Accueil", voicePitch, voiceRate)
                                                 navigationStack.clear()
+                                                gridPage = 0 // Retour à la première page, même si l'on était déjà à l'accueil
                                             },
                                             modifier = Modifier.fillMaxWidth().height(80.dp)
                                         )
@@ -562,6 +564,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             page = leftPage,
                                             onPageChange = { leftPage = it },
                                             onLayout = { if (it != leftLayout) leftLayout = it },
+                                            onSpeak = { speakText(it, voicePitch, voiceRate) },
                                             onPagerBounds = { previous, next -> leftPreviousRect = previous; leftNextRect = next },
                                             modifier = Modifier.weight(1f).fillMaxWidth()
                                         ) { index, slotModifier ->
@@ -631,7 +634,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                 page = gridPage,
                                                 onPageChange = { gridPage = it },
                                                 onLayout = { if (it != gridLayout) gridLayout = it },
-                                                onPagerBounds = { previous, next -> previousPageRect = previous; nextPageRect = next },
+                                                onSpeak = { speakText(it, voicePitch, voiceRate) },
+                                            onPagerBounds = { previous, next -> previousPageRect = previous; nextPageRect = next },
                                                 modifier = Modifier
                                                     .fillMaxSize()
                                                     .padding(bottom = 16.dp)
@@ -710,7 +714,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     page = rightPage,
                                     onPageChange = { rightPage = it },
                                     onLayout = { if (it != rightLayout) rightLayout = it },
-                                    onPagerBounds = { previous, next -> rightPreviousRect = previous; rightNextRect = next },
+                                    onSpeak = { speakText(it, voicePitch, voiceRate) },
+                                            onPagerBounds = { previous, next -> rightPreviousRect = previous; rightNextRect = next },
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
