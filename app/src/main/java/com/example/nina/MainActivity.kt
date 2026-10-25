@@ -209,6 +209,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     // Grilles prêtes : sauvegarde de l'ancienne disposition pour pouvoir revenir en arrière
                     val prefs = context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE)
                     var showRecommendedDialog by remember { mutableStateOf(false) }
+                    var showPrintBoard by remember { mutableStateOf(false) } // Planche imprimable (PDF)
                     var showAutoBackups by remember { mutableStateOf(false) }
 
                     // --- COMMANDE OCULAIRE ---
@@ -278,7 +279,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             uri?.let {
                                 try {
                                     val json = context.contentResolver.openInputStream(it)?.reader()?.use { reader -> reader.readText() } ?: return@let
-                                    val backup = parseBackup(json)
+                                    val backup = parseBackup(json).installEmbeddedPhotos(context)
                                     navigationStack.clear() // Les dossiers ouverts n'existent plus après la restauration
                                     boutons.clear(); boutons.addAll(backup.buttons)
                                     backup.coreWords?.let { list -> coreWords.clear(); coreWords.addAll(list) }
@@ -484,6 +485,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                 onRecommendedLayout = { showRecommendedDialog = true },
                                 onAutoBackups = { showAutoBackups = true },
                                 onEyeGaze = { showEyeGaze = true },
+                                onPrintBoard = { showPrintBoard = true },
                                 voiceWarning = when (voiceStatus) {
                                     VoiceStatus.NETWORK_ONLY -> "Voix française seulement avec internet"
                                     VoiceStatus.MISSING -> "Voix française absente"
@@ -952,6 +954,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         )
                     }
 
+                    if (showPrintBoard) {
+                        PrintBoardDialog(
+                            home = boutons, left = coreWords, quick = quickFires, defaultColumns = columnCount,
+                            onDismiss = { showPrintBoard = false }
+                        )
+                    }
+
                     if (showRecommendedDialog) {
                         VocabularyPackDialog(
                             currentColumns = columnCount,
@@ -1191,7 +1200,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private fun shareBackupFile(context: Context, backup: NinaBackup) {
         try {
             val file = File(context.cacheDir, "sauvegarde_nina.json")
-            file.writeText(GsonInstance.gson.toJson(backup))
+            // Les photos prises avec la tablette partent avec le fichier (sinon elles seraient perdues sur une autre tablette)
+            file.writeText(GsonInstance.gson.toJson(backup.withEmbeddedPhotos(context)))
             val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
             val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = "application/json"
@@ -1293,6 +1303,7 @@ fun AdminToolbar(
     onRecommendedLayout: () -> Unit, onRestorePreviousLayout: (() -> Unit)?, // null : rien à restaurer
     onAutoBackups: () -> Unit,
     onEyeGaze: () -> Unit,
+    onPrintBoard: () -> Unit,
     voiceWarning: String?, onVoiceFix: () -> Unit, // null : la voix fonctionne hors ligne
     onLock: () -> Unit,
     modifier: Modifier = Modifier
@@ -1365,6 +1376,7 @@ fun AdminToolbar(
                 HorizontalDivider()
                 DropdownMenuItem(text = { Text("🗂 Sauvegardes automatiques…") }, onClick = { onMoreToggle(false); onAutoBackups() })
                 DropdownMenuItem(text = { Text("🧩 Grilles prêtes…") }, onClick = { onMoreToggle(false); onRecommendedLayout() })
+                DropdownMenuItem(text = { Text("🖨 Planche imprimable…") }, onClick = { onMoreToggle(false); onPrintBoard() })
                 onRestorePreviousLayout?.let { restore ->
                     DropdownMenuItem(text = { Text("↩ Revenir à la disposition précédente") }, onClick = { onMoreToggle(false); restore() })
                 }

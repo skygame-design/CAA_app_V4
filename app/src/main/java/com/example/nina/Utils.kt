@@ -41,18 +41,46 @@ fun hideSystemBars(window: android.view.Window) {
  */
 fun saveImageToInternalStorage(context: Context, uri: Uri): String? {
     return try {
-        val inputStream = context.contentResolver.openInputStream(uri)
-        val bitmap = BitmapFactory.decodeStream(inputStream)
-        val fileName = "img_${System.currentTimeMillis()}.png"
-        val file = File(context.filesDir, fileName)
-        val out = FileOutputStream(file)
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-        out.flush(); out.close()
+        val resolver = context.contentResolver
+        // Taille d'origine (une photo d'appareil fait souvent 4000 × 3000) : on la réduit dès le décodage
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val options = BitmapFactory.Options().apply { inSampleSize = photoSampleSize(bounds.outWidth, bounds.outHeight, PHOTO_MAX_SIZE) }
+        var bitmap = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) } ?: return null
+        // Photo prise tablette tournée : l'orientation est dans les données EXIF, on redresse l'image
+        val rotation = resolver.openInputStream(uri)?.use { exifRotation(android.media.ExifInterface(it)) } ?: 0
+        val scale = minOf(1f, PHOTO_MAX_SIZE.toFloat() / maxOf(bitmap.width, bitmap.height))
+        if (rotation != 0 || scale < 1f) {
+            val matrix = android.graphics.Matrix().apply { postScale(scale, scale); postRotate(rotation.toFloat()) }
+            bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        }
+        // Stockée dans la tablette (dossier privé de l'app) : la photo reste visible sans réseau
+        val file = File(context.filesDir, "photo_${System.currentTimeMillis()}.jpg")
+        FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 88, it) }
         file.absolutePath
     } catch (_: Exception) {
         null
     }
 }
+
+/** Plus grand côté d'une photo enregistrée : net sur un picto, léger dans la tablette et les sauvegardes. */
+const val PHOTO_MAX_SIZE = 1024
+
+/** Facteur de réduction au décodage (puissance de 2) pour que le plus grand côté reste au moins égal à maxSize. */
+fun photoSampleSize(width: Int, height: Int, maxSize: Int): Int {
+    var sample = 1
+    while (maxOf(width, height) / (sample * 2) >= maxSize) sample *= 2
+    return sample
+}
+
+private fun exifRotation(exif: android.media.ExifInterface): Int =
+    when (exif.getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)) {
+        android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+        android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+        android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+        else -> 0
+    }
 
 /**
  * Télécharge une image depuis le web et la stocke dans la tablette, pour qu'elle reste visible hors réseau.
@@ -95,8 +123,46 @@ fun isRemoteImage(imageUrl: String?) = imageUrl != null && (imageUrl.startsWith(
 data class NinaBackup(
     val buttons: List<AACCell>,
     val coreWords: List<AACCell>? = null,
-    val quickFires: List<AACCell>? = null
+    val quickFires: List<AACCell>? = null,
+    // Photos et images de la galerie (nom du fichier -> contenu en base64) : elles n'existent que dans la tablette,
+    // le fichier partagé les emporte pour qu'une restauration sur une autre tablette les retrouve
+    val photos: Map<String, String>? = null
 )
+
+/** Tous les pictos d'une sauvegarde, dossiers compris. */
+fun NinaBackup.allCells(): List<AACCell> {
+    fun walk(cells: List<AACCell>): List<AACCell> = cells.flatMap { listOf(it) + walk(it.content) }
+    return walk(buttons) + walk(coreWords.orEmpty()) + walk(quickFires.orEmpty())
+}
+
+/** Ajoute à la sauvegarde les images enregistrées dans la tablette qui n'ont pas d'adresse web d'origine. */
+fun NinaBackup.withEmbeddedPhotos(context: Context): NinaBackup {
+    val photos = allCells()
+        .filter { it.sourceUrl == null && it.imageUrl != null && !isRemoteImage(it.imageUrl) }
+        .mapNotNull { cell -> File(cell.imageUrl!!).takeIf { it.isFile && it.parentFile == context.filesDir } }
+        .distinctBy { it.name }
+        .associate { it.name to android.util.Base64.encodeToString(it.readBytes(), android.util.Base64.NO_WRAP) }
+    return if (photos.isEmpty()) this else copy(photos = photos)
+}
+
+/**
+ * Restauration : réécrit dans la tablette les photos emportées par la sauvegarde,
+ * et fait pointer les pictos vers ces fichiers (le dossier de l'app peut différer d'une tablette à l'autre).
+ */
+fun NinaBackup.installEmbeddedPhotos(context: Context): NinaBackup {
+    photos.orEmpty().forEach { (name, data) ->
+        val safe = File(name).name // Jamais en dehors du dossier de l'app
+        val file = File(context.filesDir, safe)
+        if (!file.exists()) runCatching { file.writeBytes(android.util.Base64.decode(data, android.util.Base64.DEFAULT)) }
+    }
+    fun relink(cells: List<AACCell>): List<AACCell> = cells.map { cell ->
+        val local = cell.imageUrl?.takeIf { !isRemoteImage(it) }?.let { File(it) }
+        val moved = local?.takeIf { !it.exists() }?.let { File(context.filesDir, it.name) }?.takeIf { it.exists() }
+        val content = androidx.compose.runtime.mutableStateListOf<AACCell>().apply { addAll(relink(cell.content)) }
+        cell.copy(imageUrl = moved?.absolutePath ?: cell.imageUrl, content = content)
+    }
+    return copy(buttons = relink(buttons), coreWords = coreWords?.let { relink(it) }, quickFires = quickFires?.let { relink(it) }, photos = null)
+}
 
 /**
  * Lit un fichier de sauvegarde. Accepte le nouveau format (objet NinaBackup)
@@ -113,7 +179,8 @@ fun parseBackup(json: String): NinaBackup {
     return NinaBackup(
         buttons = normalizeCells(backup.buttons),
         coreWords = backup.coreWords?.let { normalizeCells(it) },
-        quickFires = backup.quickFires?.let { normalizeCells(it) }
+        quickFires = backup.quickFires?.let { normalizeCells(it) },
+        photos = backup.photos
     )
 }
 

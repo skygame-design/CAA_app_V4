@@ -489,9 +489,10 @@ fun AddButtonDialog(onDismiss: () -> Unit, onConfirm: (AACCell) -> Unit) {
                                 Icon(Icons.Default.Add, null, modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).size(20.dp).background(MaterialTheme.colorScheme.primary, CircleShape).padding(4.dp), tint = Color.White)
                             }
                             Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Image du picto", fontWeight = FontWeight.Bold)
-                                Text("Touchez le carré pour une photo de la galerie, ou cherchez dans les banques d'images.", style = MaterialTheme.typography.bodySmall)
+                                Text("Une photo (la tasse de Nina, maman…), une image de la galerie, ou un picto des banques d'images.", style = MaterialTheme.typography.bodySmall)
+                                PhotoSourceButtons(onImage = { selectedUrl = it })
                             }
                         }
                         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
@@ -750,9 +751,10 @@ fun EditDialog(
                                         }
                                     }
                                     Spacer(modifier = Modifier.width(16.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
+                                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Text("Image du picto", fontWeight = FontWeight.Bold)
-                                        Text("Touchez le carré pour une photo de la galerie, ou cherchez dans les banques d'images.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                        Text("Une photo, une image de la galerie, ou un picto des banques d'images.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                        PhotoSourceButtons(onImage = { imageUrl = it })
                                     }
                                 }
                                 PictoSearchPanel(query = name, selectedUrl = imageUrl, onSelect = { imageUrl = it })
@@ -1857,6 +1859,29 @@ private val helpTopics = listOf(
         )
     ),
     HelpTopic(
+        Icons.Default.PhotoCamera, "Photos et planche imprimable", "Vraies photos, version papier", isNew = true,
+        blocks = listOf(
+            HelpText("Pour un enfant qui débute, une vraie photo (sa tasse, son doudou, maman) parle souvent plus qu'un pictogramme."),
+            HelpSteps(
+                "Faire un picto avec une photo", listOf(
+                    "Mode adulte › Ajouter (ou Édition, puis toucher un picto).",
+                    "« Prendre une photo » : l'appareil photo s'ouvre ; cadrez l'objet ou la personne de près, sur un fond simple.",
+                    "Ou « Galerie » pour une photo déjà prise.",
+                    "La photo est réduite, redressée et enregistrée dans la tablette : elle reste visible sans internet."
+                )
+            ),
+            HelpTip("Le fichier « Partager / Sauvegarder » emporte aussi les photos : une restauration sur une autre tablette les retrouve."),
+            HelpSteps(
+                "Imprimer la planche", listOf(
+                    "Mode adulte › ⋮ › Planche imprimable.",
+                    "Gardez le même nombre de pictos par rangée qu'à l'écran : les mots restent aux mêmes places.",
+                    "« Imprimer » ouvre l'impression d'Android (imprimante, ou Enregistrer au format PDF) ; « Partager le PDF » l'envoie par mail, Drive…"
+                )
+            ),
+            HelpTip("Page d'accueil comme l'écran (dossiers à gauche, phrases rapides à droite), puis une page par dossier. Plastifiez-la : c'est le secours quand la tablette n'est pas là.")
+        )
+    ),
+    HelpTopic(
         Icons.Default.Accessibility, "Réglages et accessibilité", "Vue, voix, toucher",
         blocks = listOf(
             HelpRows(
@@ -2318,5 +2343,58 @@ private fun shareStatsFile(context: android.content.Context, file: java.io.File)
         context.startActivity(android.content.Intent.createChooser(intent, "Exporter les statistiques via :"))
     } catch (e: Exception) {
         e.printStackTrace()
+    }
+}
+
+/**
+ * Image d'un picto à partir d'une photo prise avec la tablette, ou de la galerie.
+ * L'image est réduite (1024 pixels au plus), redressée et enregistrée dans la tablette :
+ * elle reste visible sans réseau, et part avec le fichier de sauvegarde partagé.
+ */
+@Composable
+fun PhotoSourceButtons(onImage: (String) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    // Fichier temporaire où l'appareil photo écrit la photo (dans le cache, partagé via le FileProvider)
+    val tempFile = remember { java.io.File(context.cacheDir, "photo_prise.jpg") }
+    val tempUri = remember { androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempFile) }
+
+    fun store(uri: Uri, deleteAfter: Boolean) {
+        busy = true
+        scope.launch {
+            val path = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                saveImageToInternalStorage(context, uri).also { if (deleteAfter) tempFile.delete() }
+            }
+            busy = false
+            if (path != null) onImage(path)
+            else android.widget.Toast.makeText(context, "Impossible d'enregistrer l'image", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) store(tempUri, deleteAfter = true) }
+    // L'app déclare la caméra (commande oculaire) : Android exige alors l'autorisation avant d'ouvrir l'appareil photo
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) cameraLauncher.launch(tempUri)
+        else android.widget.Toast.makeText(context, "Autorisez la caméra pour prendre une photo", android.widget.Toast.LENGTH_LONG).show()
+    }
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { store(it, deleteAfter = false) } }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = {
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (granted) cameraLauncher.launch(tempUri) else permissionLauncher.launch(android.Manifest.permission.CAMERA)
+        }, enabled = !busy) {
+            Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Prendre une photo")
+        }
+        OutlinedButton(onClick = { galleryLauncher.launch("image/*") }, enabled = !busy) {
+            Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Galerie")
+        }
+        if (busy) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
     }
 }
