@@ -8,8 +8,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
@@ -41,29 +43,53 @@ private fun screenSizeCm(): Pair<Double, Double> {
     return (m.widthPixels / m.xdpi * 2.54) to (m.heightPixels / m.ydpi * 2.54)
 }
 
-private enum class GazeScreen { HOME, CALIBRATION, RESULT, VERIFICATION, FREE }
+/** Les trois façons de calibrer. */
+private enum class CalibrationMode(val label: String) {
+    PICTOS("Calibration sur les pictos"),   // une cible à l'emplacement de chaque picto (remplace la calibration)
+    REFINE("Retouche rapide"),              // 6 pictos, ajoutés à la calibration existante
+    GENERAL("Calibration générale")         // 9 points répartis sur l'écran
+}
+
+private enum class GazeScreen { HOME, CALIBRATION, RESULT, VERIFICATION, TRIAL }
 
 private val Accent = Color(0xFF4A5D91)
 
 /**
- * Commande oculaire (étape 1) : état de la caméra, calibration à 9 points, vérification de la précision,
- * et curseur de regard sur l'écran principal. La sélection des pictos par le regard viendra ensuite.
+ * Commande oculaire : état de la caméra, calibration (sur les pictos, retouche rapide, générale),
+ * vérification de la précision, essai sur les pictos, et réglages de la sélection par le regard.
+ *
+ * @param pictoZones emplacements des pictos et boutons de l'écran principal au moment de l'ouverture
  */
 @Composable
 fun EyeGazeDialog(
     tracker: GazeTracker,
+    pictoZones: List<NormRect>,
     hasCameraPermission: Boolean,
     onRequestPermission: () -> Unit,
     cursorEnabled: Boolean,
     onCursorEnabledChange: (Boolean) -> Unit,
+    selectionEnabled: Boolean,
+    onSelectionEnabledChange: (Boolean) -> Unit,
+    dwellMs: Long,
+    onDwellMsChange: (Long) -> Unit,
     onProfileChanged: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     var screen by remember { mutableStateOf(GazeScreen.HOME) }
+    var mode by remember { mutableStateOf(CalibrationMode.PICTOS) }
     var profile by remember { mutableStateOf(GazeStore.activeProfile(context)) }
     var pendingSamples by remember { mutableStateOf<List<GazeSample>>(emptyList()) }
+    var plannedCount by remember { mutableIntStateOf(0) }
     val (widthCm, heightCm) = screenSizeCm()
+    val centers = remember(pictoZones) { pictoZones.map { it.centerX to it.centerY } }
+    val hasPictos = centers.size >= 5
+
+    fun targetsFor(m: CalibrationMode) = when {
+        m == CalibrationMode.GENERAL || !hasPictos -> GazeTargets.calibration9
+        m == CalibrationMode.REFINE -> GazeCalibrationPlan.pickRefineTargets(centers, 6)
+        else -> GazeCalibrationPlan.pickTargets(centers, max = 18)
+    }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         HideSystemBarsInDialog()
@@ -72,21 +98,35 @@ fun EyeGazeDialog(
                 GazeScreen.HOME -> GazeHome(
                     tracker = tracker, profile = profile, hasCameraPermission = hasCameraPermission,
                     onRequestPermission = onRequestPermission,
+                    pictoCount = if (hasPictos) targetsFor(CalibrationMode.PICTOS).size else 0,
                     cursorEnabled = cursorEnabled, onCursorEnabledChange = onCursorEnabledChange,
-                    onCalibrate = { screen = GazeScreen.CALIBRATION },
+                    selectionEnabled = selectionEnabled, onSelectionEnabledChange = onSelectionEnabledChange,
+                    dwellMs = dwellMs, onDwellMsChange = onDwellMsChange,
+                    onCalibrate = { m -> mode = m; screen = GazeScreen.CALIBRATION },
                     onVerify = { screen = GazeScreen.VERIFICATION },
-                    onFree = { screen = GazeScreen.FREE },
+                    onTrial = { screen = GazeScreen.TRIAL },
                     onDismiss = onDismiss
                 )
-                GazeScreen.CALIBRATION -> CalibrationRun(
-                    tracker = tracker,
-                    onFinished = { samples -> pendingSamples = samples; screen = GazeScreen.RESULT },
-                    onCancel = { screen = GazeScreen.HOME }
-                )
+                GazeScreen.CALIBRATION -> {
+                    val targets = remember(mode) { targetsFor(mode) }
+                    CalibrationRun(
+                        tracker = tracker, targets = targets,
+                        onFinished = { samples ->
+                            plannedCount = targets.size
+                            // Retouche : les nouvelles mesures remplacent les anciennes aux mêmes endroits, le reste est gardé
+                            pendingSamples = if (mode == CalibrationMode.REFINE) GazeCalibrationPlan.merge(profile?.samples.orEmpty(), samples) else samples
+                            screen = GazeScreen.RESULT
+                        },
+                        onCancel = { screen = GazeScreen.HOME }
+                    )
+                }
                 GazeScreen.RESULT -> {
                     val error = remember(pendingSamples) { GazeModel.leaveOneOutError(pendingSamples, widthScale = widthCm, heightScale = heightCm) }
+                    val newPoints = if (mode == CalibrationMode.REFINE) pendingSamples.size - (profile?.samples?.size ?: 0) else pendingSamples.size
                     CalibrationResult(
-                        measured = pendingSamples.size, total = GazeTargets.calibration9.size, errorCm = error,
+                        mode = mode, measured = pendingSamples.size, planned = plannedCount, errorCm = error,
+                        refinedFrom = profile?.errorCm.takeIf { mode == CalibrationMode.REFINE },
+                        enoughPoints = pendingSamples.size >= 6 && (mode == CalibrationMode.REFINE || newPoints >= 6),
                         onSave = {
                             val saved = GazeProfile("Principal", pendingSamples, System.currentTimeMillis(), error)
                             GazeStore.saveProfile(context, saved)
@@ -98,12 +138,17 @@ fun EyeGazeDialog(
                         onCancel = { screen = GazeScreen.HOME }
                     )
                 }
-                GazeScreen.VERIFICATION, GazeScreen.FREE -> {
+                GazeScreen.VERIFICATION, GazeScreen.TRIAL -> {
                     val model = remember(profile) { profile?.model() }
                     if (model == null) screen = GazeScreen.HOME
-                    else VerificationRun(
-                        tracker = tracker, model = model, free = screen == GazeScreen.FREE,
+                    else if (screen == GazeScreen.VERIFICATION) VerificationRun(
+                        tracker = tracker, model = model,
+                        targets = if (hasPictos) GazeCalibrationPlan.pickRefineTargets(centers, 5) else GazeTargets.verification5,
                         widthCm = widthCm, heightCm = heightCm,
+                        onClose = { screen = GazeScreen.HOME }
+                    )
+                    else PictoTrial(
+                        tracker = tracker, model = model, zones = pictoZones, dwellMs = dwellMs,
                         onClose = { screen = GazeScreen.HOME }
                     )
                 }
@@ -115,13 +160,20 @@ fun EyeGazeDialog(
 @Composable
 private fun GazeHome(
     tracker: GazeTracker, profile: GazeProfile?, hasCameraPermission: Boolean, onRequestPermission: () -> Unit,
+    pictoCount: Int,
     cursorEnabled: Boolean, onCursorEnabledChange: (Boolean) -> Unit,
-    onCalibrate: () -> Unit, onVerify: () -> Unit, onFree: () -> Unit, onDismiss: () -> Unit
+    selectionEnabled: Boolean, onSelectionEnabledChange: (Boolean) -> Unit,
+    dwellMs: Long, onDwellMsChange: (Long) -> Unit,
+    onCalibrate: (CalibrationMode) -> Unit, onVerify: () -> Unit, onTrial: () -> Unit, onDismiss: () -> Unit
 ) {
     val frame by tracker.frames.collectAsState()
     val error by tracker.error.collectAsState()
+    val cameraOk = hasCameraPermission && error == null
 
-    Column(modifier = Modifier.fillMaxSize().systemBarsPadding().padding(32.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    Column(
+        modifier = Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(32.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("👁 Commande oculaire", fontWeight = FontWeight.Bold, fontSize = 28.sp, modifier = Modifier.weight(1f))
             IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Fermer") }
@@ -169,29 +221,73 @@ private fun GazeHome(
                     Text("Calibration", fontWeight = FontWeight.Bold, color = Accent, fontSize = 18.sp)
                     if (profile == null) Text("Pas encore calibrée.", color = Color.Gray)
                     else {
-                        Text("Profil « ${profile.name} », ${profile.samples.size} points")
-                        Text("Faite le ${DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.SHORT).format(Date(profile.updatedAt))}", fontSize = 13.sp, color = Color.Gray)
+                        Text("${profile.samples.size} points mesurés")
+                        Text("Mise à jour le ${DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.SHORT).format(Date(profile.updatedAt))}", fontSize = 13.sp, color = Color.Gray)
                         profile.errorCm?.let { Text(precisionText(it), fontWeight = FontWeight.Bold) }
                     }
                 }
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = onCalibrate, enabled = hasCameraPermission && error == null, colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
-                Text(if (profile == null) "Calibrer (9 points)" else "Refaire la calibration (9 points)")
+        // Calibrations
+        Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Calibrer", fontWeight = FontWeight.Bold, color = Accent, fontSize = 18.sp)
+                Text(
+                    if (pictoCount > 0) "La calibration se fait aux emplacements des pictos affichés : faites-la avec la taille de grille que Nina utilise. " +
+                        "La retouche rapide complète la calibration existante (lumière ou position changée)."
+                    else "Les pictos de l'écran n'ont pas pu être repérés : la calibration générale (9 points) sera utilisée.",
+                    fontSize = 14.sp, color = Color.DarkGray
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = { onCalibrate(CalibrationMode.PICTOS) }, enabled = cameraOk && pictoCount > 0, colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                        Text("Calibrer sur les pictos ($pictoCount points)")
+                    }
+                    OutlinedButton(onClick = { onCalibrate(CalibrationMode.REFINE) }, enabled = cameraOk && profile != null && pictoCount > 0) { Text("Retouche rapide (6 points)") }
+                    TextButton(onClick = { onCalibrate(CalibrationMode.GENERAL) }, enabled = cameraOk) { Text("Calibration générale (9 points)") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = onVerify, enabled = profile != null && cameraOk) { Text("Vérifier la précision") }
+                    OutlinedButton(onClick = onTrial, enabled = profile != null && cameraOk && pictoCount > 0) { Text("Essai sur les pictos") }
+                }
             }
-            OutlinedButton(onClick = onVerify, enabled = profile != null && hasCameraPermission) { Text("Vérifier la précision") }
-            OutlinedButton(onClick = onFree, enabled = profile != null && hasCameraPermission) { Text("Essai libre (grille)") }
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.background(Color.White, RoundedCornerShape(12.dp)).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Afficher le curseur du regard sur l'écran principal", fontWeight = FontWeight.Bold)
-                Text("Étape 1 : le curseur montre où l'app pense que l'enfant regarde, sans encore sélectionner les pictos.", fontSize = 13.sp, color = Color.Gray)
+        // Réglages de l'utilisation sur l'écran principal
+        Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Sur l'écran de Nina", fontWeight = FontWeight.Bold, color = Accent, fontSize = 18.sp)
+                SettingSwitch(
+                    "Sélection par le regard",
+                    "La case regardée est encadrée en orange ; un anneau se remplit, puis le picto est activé comme par un toucher. Inactif en mode adulte.",
+                    selectionEnabled, profile != null && hasCameraPermission, onSelectionEnabledChange
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Durée de fixation", modifier = Modifier.width(170.dp))
+                    Slider(
+                        value = dwellMs / 1000f, onValueChange = { onDwellMsChange((it * 10).toInt() * 100L) },
+                        valueRange = 0.6f..3f, steps = 11, modifier = Modifier.weight(1f)
+                    )
+                    Text("%.1f s".format(dwellMs / 1000f), modifier = Modifier.width(60.dp), textAlign = TextAlign.End)
+                }
+                SettingSwitch(
+                    "Montrer le point du regard",
+                    "Pour l'adulte : un rond orange montre où l'app estime le regard, avant l'aimant vers les cases.",
+                    cursorEnabled, profile != null && hasCameraPermission, onCursorEnabledChange
+                )
             }
-            Switch(checked = cursorEnabled, enabled = profile != null && hasCameraPermission, onCheckedChange = onCursorEnabledChange)
         }
+    }
+}
+
+@Composable
+private fun SettingSwitch(title: String, subtitle: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Bold)
+            Text(subtitle, fontSize = 13.sp, color = Color.Gray)
+        }
+        Switch(checked = checked, enabled = enabled, onCheckedChange = onChange)
     }
 }
 
@@ -221,7 +317,7 @@ private fun GazeTarget(x: Double, y: Double, collecting: Boolean) {
         animationSpec = infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "pulse"
     )
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val size = 110.dp
+        val size = 100.dp
         val sizePx = with(LocalDensity.current) { size.toPx() }
         val left = (constraints.maxWidth * x - sizePx / 2).toInt()
         val top = (constraints.maxHeight * y - sizePx / 2).toInt()
@@ -231,32 +327,32 @@ private fun GazeTarget(x: Double, y: Double, collecting: Boolean) {
                 .background(if (collecting) Color(0xFFFFD54F) else Color(0xFFFF8A65), CircleShape)
                 .border(6.dp, Color.White, CircleShape)
         ) {
-            Text("⭐", fontSize = 44.sp)
+            Text("⭐", fontSize = 40.sp)
         }
     }
 }
 
-/** Calibration : 9 cibles l'une après l'autre ; pour chacune, médiane des images où les yeux sont visibles. */
+/** Calibration : les cibles l'une après l'autre ; pour chacune, médiane des images où les yeux sont visibles. */
 @Composable
-private fun CalibrationRun(tracker: GazeTracker, onFinished: (List<GazeSample>) -> Unit, onCancel: () -> Unit) {
+private fun CalibrationRun(tracker: GazeTracker, targets: List<Pair<Double, Double>>, onFinished: (List<GazeSample>) -> Unit, onCancel: () -> Unit) {
     var index by remember { mutableIntStateOf(0) }
     var collecting by remember { mutableStateOf(false) }
     var waitingForFace by remember { mutableStateOf(false) }
     val frame by tracker.frames.collectAsState()
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(targets) {
         val samples = mutableListOf<GazeSample>()
-        GazeTargets.calibration9.forEachIndexed { i, (tx, ty) ->
+        targets.forEachIndexed { i, (tx, ty) ->
             index = i; collecting = false
-            delay(1000) // Le temps que le regard arrive sur la cible
+            delay(800) // Le temps que le regard arrive sur la cible
             collecting = true
             val frames = mutableListOf<DoubleArray>()
-            // Jusqu'à 30 images utilisables, au plus 3 secondes (clignements ignorés)
-            withTimeoutOrNull(3000) {
+            // Jusqu'à 24 images utilisables, au plus 2,5 secondes (clignements ignorés)
+            withTimeoutOrNull(2500) {
                 tracker.frames.filterNotNull().first { f ->
                     waitingForFace = !f.usable
                     if (f.usable) f.features?.let { frames += it.regressors() }
-                    frames.size >= 30 // Arrête la collecte de cette cible
+                    frames.size >= 24 // Arrête la collecte de cette cible
                 }
             }
             if (frames.size >= 8) medianFeatures(frames)?.let { samples += GazeSample(it, tx, ty) }
@@ -265,10 +361,10 @@ private fun CalibrationRun(tracker: GazeTracker, onFinished: (List<GazeSample>) 
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF263238))) {
-        val (tx, ty) = GazeTargets.calibration9[index]
+        val (tx, ty) = targets[index]
         GazeTarget(tx, ty, collecting)
         Text(
-            if (waitingForFace && collecting) "Je ne vois pas les yeux… regarde l'étoile !" else "Regarde l'étoile ⭐  (${index + 1} / ${GazeTargets.calibration9.size})",
+            if (waitingForFace && collecting) "Je ne vois pas les yeux… regarde l'étoile !" else "Regarde l'étoile ⭐  (${index + 1} / ${targets.size})",
             color = Color.White, fontSize = 20.sp,
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 24.dp)
         )
@@ -278,25 +374,39 @@ private fun CalibrationRun(tracker: GazeTracker, onFinished: (List<GazeSample>) 
 }
 
 @Composable
-private fun CalibrationResult(measured: Int, total: Int, errorCm: Double?, onSave: () -> Unit, onRetry: () -> Unit, onCancel: () -> Unit) {
+private fun CalibrationResult(
+    mode: CalibrationMode, measured: Int, planned: Int, errorCm: Double?, refinedFrom: Double?, enoughPoints: Boolean,
+    onSave: () -> Unit, onRetry: () -> Unit, onCancel: () -> Unit
+) {
     Column(
         modifier = Modifier.fillMaxSize().padding(48.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Calibration terminée", fontWeight = FontWeight.Bold, fontSize = 28.sp)
-        Text("$measured points mesurés sur $total", fontSize = 18.sp)
+        Text("${mode.label} terminée", fontWeight = FontWeight.Bold, fontSize = 28.sp)
+        Text(
+            if (mode == CalibrationMode.REFINE) "$planned pictos remesurés, $measured points au total dans la calibration"
+            else "$measured points mesurés sur $planned",
+            fontSize = 18.sp
+        )
         when {
-            measured < 6 -> Text(
+            !enoughPoints -> Text(
                 "Pas assez de points : les yeux n'étaient pas assez visibles. Vérifiez la lumière et la distance, puis recommencez.",
                 color = Color(0xFFC62828), textAlign = TextAlign.Center
             )
-            errorCm != null -> Text(precisionText(errorCm), fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            errorCm != null -> {
+                Text(precisionText(errorCm), fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                refinedFrom?.let { Text("Avant la retouche : %.1f cm".format(it), color = Color.Gray) }
+                Text(
+                    "Cette estimation est mesurée « entre » les points. Sur les pictos eux-mêmes, la correction locale et l'aimant font mieux.",
+                    fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center
+                )
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = onCancel) { Text("Annuler") }
             OutlinedButton(onClick = onRetry) { Text("Recommencer") }
-            Button(onClick = onSave, enabled = measured >= 6, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("Enregistrer") }
+            Button(onClick = onSave, enabled = enoughPoints, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("Enregistrer") }
         }
     }
 }
@@ -338,19 +448,19 @@ fun GazeCursor(point: Pair<Double, Double>?) {
     }
 }
 
-/**
- * Vérification : 5 cibles, l'écart moyen entre le regard estimé et la cible est affiché en cm.
- * Mode libre : une grille de 4 × 3 cases s'allume là où l'enfant regarde (comme les pictos à 4 par rangée).
- */
+/** Vérification : quelques cibles sur les pictos ; l'écart moyen entre le regard estimé et la cible est affiché en cm. */
 @Composable
-private fun VerificationRun(tracker: GazeTracker, model: GazeModel, free: Boolean, widthCm: Double, heightCm: Double, onClose: () -> Unit) {
+private fun VerificationRun(
+    tracker: GazeTracker, model: GazeModel, targets: List<Pair<Double, Double>>,
+    widthCm: Double, heightCm: Double, onClose: () -> Unit
+) {
     val point by rememberGazePoint(tracker, model)
     var index by remember { mutableIntStateOf(0) }
     var resultCm by remember { mutableStateOf<Double?>(null) }
 
-    if (!free) LaunchedEffect(Unit) {
+    LaunchedEffect(Unit) {
         val errors = mutableListOf<Double>()
-        GazeTargets.verification5.forEachIndexed { i, (tx, ty) ->
+        targets.forEachIndexed { i, (tx, ty) ->
             index = i
             delay(1000)
             val seen = mutableListOf<Pair<Double, Double>>()
@@ -364,34 +474,71 @@ private fun VerificationRun(tracker: GazeTracker, model: GazeModel, free: Boolea
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFFFAF3E0))) {
-        if (free) {
-            // Grille 4 × 3 : la case regardée s'allume
-            Column(modifier = Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                repeat(3) { row ->
-                    Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        repeat(4) { col ->
-                            val lit = point?.let { (it.first * 4).toInt().coerceIn(0, 3) == col && (it.second * 3).toInt().coerceIn(0, 2) == row } == true
-                            Box(modifier = Modifier.weight(1f).fillMaxHeight().background(if (lit) Color(0xFFC8E6C9) else Color.White, RoundedCornerShape(16.dp))
-                                .border(if (lit) 4.dp else 1.dp, if (lit) Color(0xFF43A047) else Color.LightGray, RoundedCornerShape(16.dp)))
-                        }
-                    }
-                }
-            }
-        } else if (resultCm == null) {
-            val (tx, ty) = GazeTargets.verification5[index]
+        if (resultCm == null) {
+            val (tx, ty) = targets[index]
             GazeTarget(tx, ty, collecting = false)
         }
         GazeCursor(point)
-
         Column(modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                when {
-                    free -> "Essai libre : la case regardée s'allume en vert"
-                    resultCm == null -> "Regarde l'étoile ⭐  (${index + 1} / ${GazeTargets.verification5.size})"
-                    else -> precisionText(resultCm!!)
-                },
+                if (resultCm == null) "Regarde l'étoile ⭐  (${index + 1} / ${targets.size})" else "Sur les pictos : " + precisionText(resultCm!!),
                 fontSize = 20.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.background(Color.White.copy(alpha = 0.85f), RoundedCornerShape(12.dp)).padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+            if (point == null) Text("Yeux non détectés", color = Color(0xFFC62828))
+        }
+        Button(onClick = onClose, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("Terminer") }
+    }
+}
+
+/**
+ * Essai sur les pictos : les cases de l'écran principal (à leur vraie place), avec l'aimant et l'anneau de fixation,
+ * exactement comme sur l'écran de Nina ; une case « sélectionnée » clignote en vert. Rien n'est activé pour de vrai.
+ */
+@Composable
+private fun PictoTrial(tracker: GazeTracker, model: GazeModel, zones: List<NormRect>, dwellMs: Long, onClose: () -> Unit) {
+    val point by rememberGazePoint(tracker, model)
+    val magnet = remember { GazeMagnet() }
+    val dwell = remember { GazeDwell(dwellMs) }
+    var current by remember { mutableStateOf<Int?>(null) }
+    var progress by remember { mutableFloatStateOf(0f) }
+    var selected by remember { mutableStateOf<Int?>(null) }
+    var selections by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        snapshotFlow { point }.collect { p ->
+            val now = android.os.SystemClock.uptimeMillis()
+            current = if (p == null) null else magnet.update(zones, p.first, p.second, now)
+            val (pr, fired) = dwell.update(current, now)
+            progress = pr
+            if (fired != null) { selected = fired; selections++ }
+        }
+    }
+    LaunchedEffect(selections) { if (selected != null) { delay(600); selected = null } }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color(0xFFFAF3E0))) {
+        val w = constraints.maxWidth; val h = constraints.maxHeight
+        val density = LocalDensity.current
+        zones.forEachIndexed { i, z ->
+            val isCurrent = i == current
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .offset { IntOffset((z.left * w).toInt(), (z.top * h).toInt()) }
+                    .size(with(density) { (z.width * w).toFloat().toDp() }, with(density) { (z.height * h).toFloat().toDp() })
+                    .background(if (i == selected) Color(0xFFA5D6A7) else Color.White, RoundedCornerShape(16.dp))
+                    .border(if (isCurrent) 6.dp else 1.dp, if (isCurrent) Color(0xCCFF6D00) else Color.LightGray, RoundedCornerShape(16.dp))
+            ) {
+                if (isCurrent && progress > 0f) {
+                    CircularProgressIndicator(progress = { progress }, modifier = Modifier.size(56.dp), color = Color(0xFFFF6D00), strokeWidth = 7.dp, trackColor = Color(0x33FF6D00))
+                }
+            }
+        }
+        Column(modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                "Essai : fixez une case jusqu'à ce que l'anneau se remplisse ($selections sélections)",
+                fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(12.dp)).padding(horizontal = 16.dp, vertical = 6.dp)
             )
             if (point == null) Text("Yeux non détectés", color = Color(0xFFC62828))
         }

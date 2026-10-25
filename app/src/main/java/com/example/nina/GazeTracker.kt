@@ -199,6 +199,18 @@ object GazeStore {
         return all.firstOrNull { it.name == name } ?: all.firstOrNull()
     }
 
+    private const val KEY_SELECTION = "gaze_selection_enabled"
+    private const val KEY_DWELL = "gaze_dwell_ms"
+
+    fun selectionEnabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SELECTION, false)
+    fun setSelectionEnabled(context: Context, enabled: Boolean) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_SELECTION, enabled).apply()
+
+    /** Durée de fixation pour activer un picto (1,2 s par défaut, réglable de 0,6 à 3 s). */
+    fun dwellMs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_DWELL, 1200L)
+    fun setDwellMs(context: Context, ms: Long) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(KEY_DWELL, ms).apply()
+
     fun cursorEnabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CURSOR, false)
     fun setCursorEnabled(context: Context, enabled: Boolean) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CURSOR, enabled).apply()

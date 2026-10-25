@@ -106,6 +106,7 @@ fun SentenceBar(
                 IconButton(
                     onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onBackspace() },
                     modifier = Modifier.padding(start = 8.dp).size(64.dp).background(Color(0xFFEDEFF7), CircleShape)
+                        .gazeZone("effacer_mot", onActivate = onBackspace)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Effacer le dernier mot", tint = Color(0xFF4A5D91), modifier = Modifier.size(32.dp))
                 }
@@ -309,6 +310,7 @@ fun PagedGrid(
     onPagerBounds: (previous: Rect, next: Rect) -> Unit,
     modifier: Modifier = Modifier,
     onSpeak: (String) -> Unit = {}, // Lecture vocale des boutons de page
+    gazeKey: String = "pages", // Préfixe des zones regardables des boutons de page
     cellContent: @Composable (cell: AACCell, modifier: Modifier) -> Unit
 ) {
     val gap = 16.dp
@@ -343,19 +345,23 @@ fun PagedGrid(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(gap)
                 ) {
+                    val previousPage: () -> Unit = { if (currentPage > 0) { onPageChange(currentPage - 1); onSpeak("Page précédente") } }
                     PageButton(
                         forward = false, enabled = currentPage > 0,
                         modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { previousBounds = it.boundsInRoot() }
-                    ) { onPageChange(currentPage - 1); onSpeak("Page précédente") }
+                            .gazeZone("${gazeKey}_precedente", enabled = currentPage > 0, onActivate = previousPage)
+                    ) { previousPage() }
                     Text(
                         "Page ${currentPage + 1} / ${layout.pageCount}",
                         fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4A5D91),
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
+                    val nextPage: () -> Unit = { if (currentPage < layout.pageCount - 1) { onPageChange(currentPage + 1); onSpeak("Page suivante") } }
                     PageButton(
                         forward = true, enabled = currentPage < layout.pageCount - 1,
                         modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { nextBounds = it.boundsInRoot() }
-                    ) { onPageChange(currentPage + 1); onSpeak("Page suivante") }
+                            .gazeZone("${gazeKey}_suivante", enabled = currentPage < layout.pageCount - 1, onActivate = nextPage)
+                    ) { nextPage() }
                 }
             }
         }
@@ -404,6 +410,7 @@ fun PagedColumn(
     onPagerBounds: (previous: Rect, next: Rect) -> Unit,
     modifier: Modifier = Modifier,
     onSpeak: (String) -> Unit = {}, // Lecture vocale des boutons de page
+    gazeKey: String = "pages", // Préfixe des zones regardables des boutons de page
     minItemHeight: Dp = 80.dp,
     gap: Dp = 12.dp,
     item: @Composable (index: Int, modifier: Modifier) -> Unit
@@ -427,12 +434,16 @@ fun PagedColumn(
                 DisposableEffect(Unit) { onDispose { onPagerBounds(Rect.Zero, Rect.Zero) } }
                 SideEffect { onPagerBounds(previousBounds, nextBounds) }
                 Row(modifier = Modifier.fillMaxWidth().height(pagerHeight), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val previousPage: () -> Unit = { if (currentPage > 0) { onPageChange(currentPage - 1); onSpeak("Page précédente") } }
                     ColumnPageButton(up = true, enabled = currentPage > 0,
                         modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { previousBounds = it.boundsInRoot() }
-                    ) { onPageChange(currentPage - 1); onSpeak("Page précédente") }
+                            .gazeZone("${gazeKey}_precedente", enabled = currentPage > 0, onActivate = previousPage)
+                    ) { previousPage() }
+                    val nextPage: () -> Unit = { if (currentPage < layout.pageCount - 1) { onPageChange(currentPage + 1); onSpeak("Page suivante") } }
                     ColumnPageButton(up = false, enabled = currentPage < layout.pageCount - 1,
                         modifier = Modifier.weight(1f).fillMaxHeight().onGloballyPositioned { nextBounds = it.boundsInRoot() }
-                    ) { onPageChange(currentPage + 1); onSpeak("Page suivante") }
+                            .gazeZone("${gazeKey}_suivante", enabled = currentPage < layout.pageCount - 1, onActivate = nextPage)
+                    ) { nextPage() }
                 }
             }
         }

@@ -96,14 +96,40 @@ class GazeModel private constructor(
     private val mean: DoubleArray, private val scale: DoubleArray,
     private val coefX: DoubleArray, private val coefY: DoubleArray
 ) {
-    fun predict(features: DoubleArray): Pair<Double, Double> {
+    /**
+     * Correction locale : pour chaque point de calibration, l'écart qui reste après la régression globale
+     * (position estimée -> vraie position). Près d'un point appris, on applique son écart ; loin de tous, rien.
+     * C'est ce qui rend la calibration « exacte » à l'emplacement des pictos.
+     */
+    private var anchors: List<Pair<Pair<Double, Double>, Pair<Double, Double>>> = emptyList()
+
+    /** Position estimée par la seule régression globale (sans correction locale). */
+    fun predictGlobal(features: DoubleArray): Pair<Double, Double> {
         val z = standardize(features, mean, scale)
         return dot(coefX, z) to dot(coefY, z)
+    }
+
+    fun predict(features: DoubleArray): Pair<Double, Double> {
+        val (x, y) = predictGlobal(features)
+        if (anchors.isEmpty()) return x to y
+        var wSum = LOCAL_PRIOR
+        var cx = 0.0; var cy = 0.0
+        anchors.forEach { (at, residual) ->
+            val d2 = (x - at.first).let { it * it } + (y - at.second).let { it * it }
+            val w = kotlin.math.exp(-d2 / (2 * LOCAL_RADIUS * LOCAL_RADIUS))
+            wSum += w; cx += w * residual.first; cy += w * residual.second
+        }
+        return (x + cx / wSum) to (y + cy / wSum)
     }
 
     companion object {
         /** Force de la régularisation : limite les termes peu informatifs (tête, position) quand il y a peu de points. */
         const val DEFAULT_LAMBDA = 0.5
+
+        /** Portée de la correction locale (fraction de l'écran) : environ une demi-case de picto. */
+        const val LOCAL_RADIUS = 0.07
+        /** Poids « pas de correction » : loin de tout point appris, la correction s'efface. */
+        const val LOCAL_PRIOR = 0.15
 
         fun fit(samples: List<GazeSample>, lambda: Double = DEFAULT_LAMBDA): GazeModel? {
             if (samples.size < 4) return null
@@ -116,7 +142,13 @@ class GazeModel private constructor(
             val rows = samples.map { standardize(it.features, mean, scale) }
             val cx = ridge(rows, samples.map { it.targetX }, lambda) ?: return null
             val cy = ridge(rows, samples.map { it.targetY }, lambda) ?: return null
-            return GazeModel(mean, scale, cx, cy)
+            val model = GazeModel(mean, scale, cx, cy)
+            // Écarts restants à chaque point (moyennés si plusieurs mesures du même picto)
+            model.anchors = samples.map { s ->
+                val (px, py) = model.predictGlobal(s.features)
+                (px to py) to ((s.targetX - px) to (s.targetY - py))
+            }
+            return model
         }
 
         /** Ajoute le terme constant (1) en tête des caractéristiques centrées-réduites. */

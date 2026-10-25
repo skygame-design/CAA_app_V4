@@ -1814,6 +1814,38 @@ private val helpTopics = listOf(
         )
     ),
     HelpTopic(
+        Icons.Default.Visibility, "Commande oculaire", "Choisir les pictos du regard", isNew = true,
+        blocks = listOf(
+            HelpText("La caméra frontale suit le regard : l'enfant choisit un picto en le fixant, sans toucher l'écran. Tout se passe dans la tablette, aucune image n'est enregistrée."),
+            HelpSteps(
+                "Mise en place", listOf(
+                    "Posez la tablette sur un support stable, face à l'enfant, à 40–60 cm, visage bien éclairé de face.",
+                    "Réglez la taille de grille que l'enfant utilisera (3 ou 4 pictos par rangée conseillés).",
+                    "Mode adulte › ⋮ › Commande oculaire. Autorisez la caméra la première fois.",
+                    "« Calibrer sur les pictos » : l'enfant suit des yeux l'étoile, qui se pose sur chaque picto. Gardez la tête la plus immobile possible.",
+                    "« Essai sur les pictos » : vérifiez qu'en fixant une case, l'anneau se remplit sur la bonne.",
+                    "Activez « Sélection par le regard », puis refermez le cadenas."
+                )
+            ),
+            HelpRows(
+                "Ce qui rend la sélection fiable", listOf(
+                    "Calibration sur les pictos" to "les mesures sont prises à l'emplacement exact de chaque picto, et l'erreur restante y est corrigée",
+                    "Aimant" to "le regard est rattaché à la case la plus proche, et n'en change qu'après une hésitation franche",
+                    "Fixation" to "l'anneau orange se remplit (1,2 s par défaut, réglable) : un coup d'œil ou un clignement ne déclenche rien",
+                    "Repos" to "après une sélection, la même case ne se redéclenche qu'après un court repos"
+                )
+            ),
+            HelpRows(
+                "Faire évoluer la calibration", listOf(
+                    "Retouche rapide" to "6 pictos remesurés et ajoutés à la calibration existante : après un changement de lumière, de position ou de support",
+                    "Calibrer sur les pictos" to "tout refaire, par exemple après un changement de taille de grille",
+                    "Vérifier la précision" to "mesure l'écart sur 5 pictos, en cm"
+                )
+            ),
+            HelpTip("La sélection par le regard est coupée en mode adulte et quand une fenêtre est ouverte. Les phrases rapides, Accueil, Play, ⌫, ← et les boutons de page se choisissent aussi du regard.")
+        )
+    ),
+    HelpTopic(
         Icons.Default.Accessibility, "Réglages et accessibilité", "Vue, voix, toucher",
         blocks = listOf(
             HelpRows(

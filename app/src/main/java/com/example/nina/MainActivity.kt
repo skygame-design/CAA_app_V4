@@ -65,6 +65,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     private var tts: TextToSpeech? = null
+    // Zones regardables de l'écran (pictos, Accueil, Play…) pour la commande oculaire
+    private val gazeRegistry = GazeZoneRegistry()
     private var ttsReady = false
     // État de la voix française (hors ligne ou non), lu par l'interface pour prévenir l'adulte
     private var voiceStatus by mutableStateOf(VoiceStatus.UNKNOWN)
@@ -86,6 +88,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
 
         setContent {
+            CompositionLocalProvider(LocalGazeRegistry provides gazeRegistry) {
             DragAndDropRoot {
                 NinaTheme {
                     val context = LocalContext.current
@@ -208,16 +211,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     val gazeTracker = remember { GazeTracker(applicationContext) }
                     DisposableEffect(Unit) { onDispose { gazeTracker.close() } }
                     var showEyeGaze by remember { mutableStateOf(false) }
-                    var gazeCursorEnabled by remember { mutableStateOf(GazeStore.cursorEnabled(context)) }
+                    var gazeCursorEnabled by remember { mutableStateOf(GazeStore.cursorEnabled(context)) } // Point brut du regard (pour l'adulte)
+                    var gazeSelectionEnabled by remember { mutableStateOf(GazeStore.selectionEnabled(context)) } // Sélection par fixation
+                    var gazeDwellMs by remember { mutableLongStateOf(GazeStore.dwellMs(context)) }
                     var gazeProfileVersion by remember { mutableIntStateOf(0) } // Change à chaque nouvelle calibration
                     val gazeModel = remember(gazeProfileVersion) { GazeStore.activeProfile(context)?.model() }
                     var hasCameraPermission by remember {
                         mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED)
                     }
                     val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> hasCameraPermission = granted }
-                    // La caméra ne tourne que si la fenêtre de commande oculaire est ouverte ou si le curseur est affiché
-                    val gazeCursorActive = gazeCursorEnabled && gazeModel != null && !showEyeGaze
-                    val needCamera = hasCameraPermission && (showEyeGaze || gazeCursorActive)
+                    // La caméra ne tourne que si la fenêtre de commande oculaire est ouverte, ou si le regard est utilisé sur l'écran principal
+                    val gazeActive = (gazeCursorEnabled || gazeSelectionEnabled) && gazeModel != null && !showEyeGaze
+                    val needCamera = hasCameraPermission && (showEyeGaze || gazeActive)
                     DisposableEffect(needCamera) {
                         if (needCamera) gazeTracker.start(this@MainActivity)
                         onDispose { gazeTracker.stop() }
@@ -502,6 +507,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                         enabled = phrase.isNotEmpty(),
                                         modifier = Modifier
                                             .size(90.dp)
+                                            .gazeZone("lire", enabled = phrase.isNotEmpty(), onActivate = speakSentence)
                                             .background(
                                                 if (phrase.isNotEmpty()) Color(0xFF4CAF50) else Color(0xFFE0E0E0), 
                                                 CircleShape
@@ -533,14 +539,16 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     // Bouton Retour : seulement dans un sous-dossier (au premier niveau, 🏠 Accueil suffit)
                                     Box(modifier = Modifier.width(80.dp)) {
                                         if (navigationStack.size > 1) {
+                                            val goBack: () -> Unit = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                speakText("Retour", voicePitch, voiceRate)
+                                                if (navigationStack.isNotEmpty()) navigationStack.removeAt(navigationStack.size - 1)
+                                            }
                                             IconButton(
-                                                onClick = {
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                    speakText("Retour", voicePitch, voiceRate)
-                                                    navigationStack.removeAt(navigationStack.size - 1)
-                                                },
+                                                onClick = goBack,
                                                 modifier = Modifier
                                                     .size(70.dp)
+                                                    .gazeZone("retour", onActivate = goBack)
                                                     .background(Color.White, CircleShape)
                                                     .border(3.dp, Color(0xFF6200EE), CircleShape)
                                             ) {
@@ -593,16 +601,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             .onGloballyPositioned { sidebarRect = it.boundsInRoot() },
                                         verticalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
+                                        val goHome: () -> Unit = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            speakText("Accueil", voicePitch, voiceRate)
+                                            navigationStack.clear()
+                                            gridPage = 0 // Retour à la première page, même si l'on était déjà à l'accueil
+                                        }
                                         HomeCell(
                                             isHome = navigationStack.isEmpty(),
                                             isGuided = false,
-                                            onClick = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                speakText("Accueil", voicePitch, voiceRate)
-                                                navigationStack.clear()
-                                                gridPage = 0 // Retour à la première page, même si l'on était déjà à l'accueil
-                                            },
-                                            modifier = Modifier.fillMaxWidth().height(80.dp)
+                                            onClick = goHome,
+                                            modifier = Modifier.fillMaxWidth().height(80.dp).gazeZone("accueil", onActivate = goHome)
                                         )
                                         val leftItemCount = coreWords.size // Pas de case « + » : la colonne reste identique en mode enfant et adulte
                                         PagedColumn(
@@ -611,6 +620,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             onPageChange = { leftPage = it },
                                             onLayout = { if (it != leftLayout) leftLayout = it },
                                             onSpeak = { speakText(it, voicePitch, voiceRate) },
+                                            gazeKey = "pages_gauche",
                                             onPagerBounds = { previous, next -> leftPreviousRect = previous; leftNextRect = next },
                                             modifier = Modifier.weight(1f).fillMaxWidth()
                                         ) { index, slotModifier ->
@@ -619,32 +629,35 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                 var posInRoot by remember { mutableStateOf(Offset.Zero) }
                                                 // Le dossier ouvert (premier niveau) est encadré : l'enfant voit où il se trouve
                                                 val isOpen = cell.isFolder && navigationStack.firstOrNull()?.id == cell.id
+                                                // Action du picto : par un toucher ou par le regard (fixation)
+                                                val onCellClick: () -> Unit = {
+                                                    if (isEditMode) {
+                                                        cellToEdit = cell
+                                                        showEditDialog = true
+                                                    } else if (cell.isFolder) {
+                                                        // Un dossier de la colonne s'ouvre depuis n'importe où
+                                                        playCellAudio(cell, voicePitch, voiceRate)
+                                                        advanceGuide(cell)
+                                                        navigationStack.clear()
+                                                        navigationStack.add(cell)
+                                                    } else {
+                                                        playCellAudio(cell, voicePitch, voiceRate)
+                                                        trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
+                                                        if (!cell.isQuickPhrase) phrase.add(cell)
+                                                    }
+                                                }
                                                 DraggableCellWrapper(cell = cell, modifier = slotModifier) {
                                                     Box(modifier = Modifier
                                                         .fillMaxSize()
                                                         .then(if (isOpen) Modifier.border(4.dp, Color(0xFF4A5D91), RoundedCornerShape(22.dp)).padding(4.dp) else Modifier)
                                                         .onGloballyPositioned { posInRoot = it.positionInRoot() }
+                                                        .gazeZone("gauche_${cell.id}", enabled = !(cell.isHidden && !isAdminMode), onActivate = onCellClick)
                                                     ) {
                                                         AACCellView(
                                                             cell = cell, haptic = haptic, debounceTime = debounceTime,
                                                             isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode, isGuided = cell.id == guidedId,
                                                             modifier = Modifier.fillMaxSize(),
-                                                            onClick = {
-                                                                if (isEditMode) {
-                                                                    cellToEdit = cell
-                                                                    showEditDialog = true
-                                                                } else if (cell.isFolder) {
-                                                                    // Un dossier de la colonne s'ouvre depuis n'importe où
-                                                                    playCellAudio(cell, voicePitch, voiceRate)
-                                                                    advanceGuide(cell)
-                                                                    navigationStack.clear()
-                                                                    navigationStack.add(cell)
-                                                                } else {
-                                                                    playCellAudio(cell, voicePitch, voiceRate)
-                                                                    trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
-                                                                    if (!cell.isQuickPhrase) phrase.add(cell)
-                                                                }
-                                                            },
+                                                            onClick = onCellClick,
                                                             onLongClick = {
                                                                 if (isAdminMode) {
                                                                     dndState.draggedCell = cell
@@ -681,6 +694,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                 onPageChange = { gridPage = it },
                                                 onLayout = { if (it != gridLayout) gridLayout = it },
                                                 onSpeak = { speakText(it, voicePitch, voiceRate) },
+                                                gazeKey = "pages_grille",
                                             onPagerBounds = { previous, next -> previousPageRect = previous; nextPageRect = next },
                                                 modifier = Modifier
                                                     .fillMaxSize()
@@ -696,30 +710,31 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                                         cell = cell,
                                                         modifier = cellModifier
                                                     ) {
+                                                        // Action du picto : par un toucher ou par le regard (fixation)
+                                                        val onCellClick: () -> Unit = {
+                                                            if (isEditMode) {
+                                                                cellToEdit = cell
+                                                                showEditDialog = true
+                                                            } else {
+                                                                playCellAudio(cell, voicePitch, voiceRate)
+                                                                trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
+                                                                if (cell.isFolder) navigationStack.add(cell)
+                                                                else {
+                                                                    if (!cell.isQuickPhrase) phrase.add(cell)
+                                                                    // Après le choix d'un mot dans un dossier, on revient à l'accueil (comme TD Snap / Grid 3)
+                                                                    if (autoReturnHome) navigationStack.clear()
+                                                                }
+                                                            }
+                                                        }
                                                         Box(modifier = Modifier.fillMaxSize().onGloballyPositioned {
                                                             posInRoot = it.positionInRoot()
                                                             gridCellsBounds[cell] = it.boundsInRoot()
-                                                        }) {
+                                                        }.gazeZone("grille_${cell.id}", enabled = !(cell.isHidden && !isAdminMode), onActivate = onCellClick)) {
                                                             AACCellView(
                                                                 cell = cell, haptic = haptic, debounceTime = debounceTime,
                                                                 isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode, isGuided = cell.id == guidedId,
                                                                 modifier = Modifier.fillMaxSize(),
-                                                                onClick = {
-                                                                    Log.d("Nina-Debug", "🖱️ Clic Cellule détecté")
-                                                                    if (isEditMode) {
-                                                                        cellToEdit = cell
-                                                                        showEditDialog = true
-                                                                    } else {
-                                                                        playCellAudio(cell, voicePitch, voiceRate)
-                                                                        trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
-                                                                        if (cell.isFolder) navigationStack.add(cell)
-                                                                        else {
-                                                                            if (!cell.isQuickPhrase) phrase.add(cell)
-                                                                            // Après le choix d'un mot dans un dossier, on revient à l'accueil (comme TD Snap / Grid 3)
-                                                                            if (autoReturnHome) navigationStack.clear()
-                                                                        }
-                                                                    }
-                                                                },
+                                                                onClick = onCellClick,
                                                                 onLongClick = {
                                                                     if (isAdminMode) {
                                                                         dndState.draggedCell = cell
@@ -762,6 +777,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     onPageChange = { rightPage = it },
                                     onLayout = { if (it != rightLayout) rightLayout = it },
                                     onSpeak = { speakText(it, voicePitch, voiceRate) },
+                                    gazeKey = "pages_droite",
                                             onPagerBounds = { previous, next -> rightPreviousRect = previous; rightNextRect = next },
                                     modifier = Modifier
                                         .weight(1f)
@@ -771,21 +787,24 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     val cell = quickFires[index]
                                     run {
                                         var posInRoot by remember { mutableStateOf(Offset.Zero) }
+                                        // Action de la phrase rapide : par un toucher ou par le regard (fixation)
+                                        val onCellClick: () -> Unit = {
+                                            if (isEditMode) {
+                                                cellToEdit = cell
+                                                showEditDialog = true
+                                            } else {
+                                                playCellAudio(cell, voicePitch, voiceRate)
+                                                trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
+                                            }
+                                        }
                                         DraggableCellWrapper(cell = cell, modifier = slotModifier) {
-                                            Box(modifier = Modifier.fillMaxSize().onGloballyPositioned { posInRoot = it.positionInRoot() }) {
+                                            Box(modifier = Modifier.fillMaxSize().onGloballyPositioned { posInRoot = it.positionInRoot() }
+                                                .gazeZone("droite_${cell.id}", enabled = !(cell.isHidden && !isAdminMode), onActivate = onCellClick)) {
                                                 AACCellView(
                                                     cell = cell, haptic = haptic, debounceTime = debounceTime,
                                                     isAdminMode = isAdminMode, isEditMode = isEditMode, isCviMode = isCviMode, isGuided = cell.id == guidedId,
                                                     modifier = Modifier.fillMaxSize(),
-                                                    onClick = {
-                                                        if (isEditMode) {
-                                                            cellToEdit = cell
-                                                            showEditDialog = true
-                                                        } else {
-                                                            playCellAudio(cell, voicePitch, voiceRate)
-                                                            trackWordUsage(cell, context, { usageStats = it }); advanceGuide(cell)
-                                                        }
-                                                    },
+                                                    onClick = onCellClick,
                                                     onLongClick = {
                                                         if (isAdminMode) {
                                                             dndState.draggedCell = cell
@@ -803,18 +822,37 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         }
                     }
 
-                    if (gazeCursorActive && gazeModel != null) {
-                        val gazePoint by rememberGazePoint(gazeTracker, gazeModel)
-                        GazeCursor(gazePoint)
+                    // Taille de l'écran, pour exprimer les positions des pictos en fractions de l'écran
+                    Box(modifier = Modifier.fillMaxSize().onGloballyPositioned {
+                        gazeRegistry.rootWidth = it.size.width.coerceAtLeast(1); gazeRegistry.rootHeight = it.size.height.coerceAtLeast(1)
+                    })
+
+                    // Regard sur l'écran principal : case visée encadrée, anneau de fixation, activation du picto.
+                    // Pas de sélection en mode adulte, ni quand une fenêtre est ouverte (elle cache les pictos).
+                    val anyDialogOpen = showAddDialog || showEditDialog || showKeyboardDialog || showAdminChallengeDialog || showSettingsDialog ||
+                        showHelpDialog || showCalibration || showWordFinder || showStatsDialog || wordFormsCell != null ||
+                        showRecommendedDialog || showAutoBackups || showVoiceHelp || loadNotice
+                    if (gazeActive && gazeModel != null) {
+                        GazeSelectionOverlay(
+                            tracker = gazeTracker, model = gazeModel, registry = gazeRegistry,
+                            selectionEnabled = gazeSelectionEnabled && !isAdminMode && !anyDialogOpen,
+                            dwellMs = gazeDwellMs,
+                            showRawPoint = gazeCursorEnabled
+                        )
                     }
 
                     if (showEyeGaze) {
                         EyeGazeDialog(
                             tracker = gazeTracker,
+                            pictoZones = remember { gazeRegistry.normalized().map { it.second } },
                             hasCameraPermission = hasCameraPermission,
                             onRequestPermission = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
                             cursorEnabled = gazeCursorEnabled,
                             onCursorEnabledChange = { gazeCursorEnabled = it; GazeStore.setCursorEnabled(context, it) },
+                            selectionEnabled = gazeSelectionEnabled,
+                            onSelectionEnabledChange = { gazeSelectionEnabled = it; GazeStore.setSelectionEnabled(context, it) },
+                            dwellMs = gazeDwellMs,
+                            onDwellMsChange = { gazeDwellMs = it; GazeStore.setDwellMs(context, it) },
                             onProfileChanged = { gazeProfileVersion++ },
                             onDismiss = { showEyeGaze = false }
                         )
@@ -969,6 +1007,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         onEditDismiss = { showEditDialog = false }
                     )
                 }
+            }
             }
         }
     }
