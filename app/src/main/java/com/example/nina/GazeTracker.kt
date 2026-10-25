@@ -166,7 +166,9 @@ data class GazeProfile(
     val name: String,
     val samples: List<GazeSample>,
     val updatedAt: Long,
-    val errorCm: Double? // Erreur moyenne estimée (validation croisée), en cm sur l'écran
+    val errorCm: Double?, // Erreur moyenne estimée (validation croisée), en cm sur l'écran
+    val checkCm: Double? = null, // Erreur mesurée par la vérification juste après la calibration (plus réaliste)
+    val version: Int = 0 // GazeFeatures.FEATURE_VERSION au moment de la calibration
 ) {
     fun model() = GazeModel.fit(samples)
 }
@@ -195,7 +197,8 @@ object GazeStore {
 
     fun activeProfile(context: Context): GazeProfile? {
         val name = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ACTIVE, null)
-        val all = profiles(context)
+        // Une calibration faite avec d'anciennes caractéristiques n'est plus utilisable : il faut la refaire
+        val all = profiles(context).filter { it.version == GazeFeatures.FEATURE_VERSION }
         return all.firstOrNull { it.name == name } ?: all.firstOrNull()
     }
 

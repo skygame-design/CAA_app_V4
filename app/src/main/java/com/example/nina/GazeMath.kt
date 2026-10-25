@@ -19,20 +19,39 @@ data class FacePoint(val x: Float, val y: Float)
  * gazeX / gazeY : position des iris dans les yeux (axe des yeux), moyenne des deux yeux.
  * headX / headY : orientation approximative de la tête (nez par rapport au milieu des yeux).
  * faceX / faceY / faceSize : position et taille du visage dans l'image (la taille indique la distance).
+ * lidRatio : hauteur de l'iris entre les paupières (0 = contre la paupière du haut, 1 = contre celle du bas).
+ * meanOpenness : ouverture moyenne des yeux ; la paupière descend quand on regarde vers le bas.
+ * Ces deux dernières donnent le regard vertical, que la position des iris seule mesure mal.
  */
 data class GazeFeatures(
     val gazeX: Double, val gazeY: Double,
     val headX: Double, val headY: Double,
     val faceX: Double, val faceY: Double, val faceSize: Double,
-    val eyeOpenness: Double
+    val eyeOpenness: Double,
+    val lidRatio: Double = 0.5,
+    val meanOpenness: Double = eyeOpenness
 ) {
-    /** Variables utilisées par la régression (le terme constant est ajouté à part). */
+    /** Variables utilisées par la régression (le terme constant est ajouté à part), dans l'ordre de SCALE_FLOOR et PENALTY. */
     fun regressors(): DoubleArray = doubleArrayOf(
-        gazeX, gazeY, gazeX * gazeY, gazeX * gazeX, gazeY * gazeY,
+        gazeX, gazeY, lidRatio, meanOpenness,
+        gazeX * gazeY, gazeX * gazeX, gazeY * gazeY,
         headX, headY, faceX, faceY
     )
 
     companion object {
+        /** Version des caractéristiques : une calibration faite avec une autre version doit être refaite. */
+        const val FEATURE_VERSION = 2
+
+        /**
+         * Écart-type minimal de chaque variable, d'après des mouvements réels. Sans ce plancher, une variable presque
+         * immobile pendant la calibration (la tête !) est « agrandie » énormément, et le moindre mouvement ensuite
+         * fait sauter le curseur : 1,1 cm à la calibration, 7,6 cm à la vérification.
+         */
+        val SCALE_FLOOR = doubleArrayOf(0.02, 0.01, 0.05, 0.03, 0.0005, 0.0005, 0.0003, 0.03, 0.03, 0.03, 0.03)
+
+        /** Frein supplémentaire sur la tête et la position du visage : le regard doit venir des yeux. */
+        val PENALTY = doubleArrayOf(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 6.0, 6.0, 6.0, 6.0)
+
         // Indices MediaPipe (maillage du visage avec iris)
         private const val RIGHT_OUTER = 33; private const val RIGHT_INNER = 133
         private const val RIGHT_TOP = 159; private const val RIGHT_BOTTOM = 145; private const val RIGHT_IRIS = 468
@@ -58,14 +77,17 @@ data class GazeFeatures(
             val ux = (b[0] - a[0]) / eyeSpan; val uy = (b[1] - a[1]) / eyeSpan
             val vx = -uy; val vy = ux
 
-            fun eye(outer: Int, inner: Int, top: Int, bottom: Int, iris: Int): Triple<Double, Double, Double> {
+            /** Pour un œil : décalage horizontal et vertical de l'iris, ouverture, et position de l'iris entre les paupières. */
+            fun eye(outer: Int, inner: Int, top: Int, bottom: Int, iris: Int): DoubleArray {
                 val o = p(outer); val i = p(inner); val t = p(top); val bo = p(bottom); val ir = p(iris)
                 val width = hypot(i[0] - o[0], i[1] - o[1]).coerceAtLeast(1e-6)
                 val cx = (o[0] + i[0]) / 2; val cy = (o[1] + i[1]) / 2
                 val dx = ((ir[0] - cx) * ux + (ir[1] - cy) * uy) / width
                 val dy = ((ir[0] - cx) * vx + (ir[1] - cy) * vy) / width
                 val open = hypot(bo[0] - t[0], bo[1] - t[1]) / width
-                return Triple(dx, dy, open)
+                val lidSpan = ((bo[0] - t[0]) * vx + (bo[1] - t[1]) * vy).let { if (kotlin.math.abs(it) < 1e-6) 1e-6 else it }
+                val lid = ((ir[0] - t[0]) * vx + (ir[1] - t[1]) * vy) / lidSpan
+                return doubleArrayOf(dx, dy, open, lid)
             }
             val r = eye(RIGHT_OUTER, RIGHT_INNER, RIGHT_TOP, RIGHT_BOTTOM, RIGHT_IRIS)
             val l = eye(LEFT_OUTER, LEFT_INNER, LEFT_TOP, LEFT_BOTTOM, LEFT_IRIS)
@@ -76,10 +98,12 @@ data class GazeFeatures(
             val headY = ((nose[0] - mx) * vx + (nose[1] - my) * vy) / eyeSpan
 
             return GazeFeatures(
-                gazeX = (r.first + l.first) / 2, gazeY = (r.second + l.second) / 2,
+                gazeX = (r[0] + l[0]) / 2, gazeY = (r[1] + l[1]) / 2,
                 headX = headX, headY = headY,
                 faceX = mx / aspect, faceY = my, faceSize = eyeSpan,
-                eyeOpenness = minOf(r.third, l.third)
+                eyeOpenness = minOf(r[2], l[2]),
+                lidRatio = ((r[3] + l[3]) / 2).coerceIn(-1.0, 2.0),
+                meanOpenness = (r[2] + l[2]) / 2
             )
         }
     }
@@ -135,13 +159,16 @@ class GazeModel private constructor(
             if (samples.size < 4) return null
             val n = samples.first().features.size
             val mean = DoubleArray(n) { j -> samples.map { it.features[j] }.average() }
+            val floors = GazeFeatures.SCALE_FLOOR.takeIf { it.size == n }
+            val penalty = GazeFeatures.PENALTY.takeIf { it.size == n } ?: DoubleArray(n) { 1.0 }
             val scale = DoubleArray(n) { j ->
                 val m = mean[j]
-                sqrt(samples.map { (it.features[j] - m).let { d -> d * d } }.average()).takeIf { it > 1e-9 } ?: 1.0
+                val sd = sqrt(samples.map { (it.features[j] - m).let { d -> d * d } }.average())
+                maxOf(sd, floors?.get(j) ?: 1e-9).takeIf { it > 1e-9 } ?: 1.0
             }
             val rows = samples.map { standardize(it.features, mean, scale) }
-            val cx = ridge(rows, samples.map { it.targetX }, lambda) ?: return null
-            val cy = ridge(rows, samples.map { it.targetY }, lambda) ?: return null
+            val cx = ridge(rows, samples.map { it.targetX }, lambda, penalty) ?: return null
+            val cy = ridge(rows, samples.map { it.targetY }, lambda, penalty) ?: return null
             val model = GazeModel(mean, scale, cx, cy)
             // Écarts restants à chaque point (moyennés si plusieurs mesures du même picto)
             model.anchors = samples.map { s ->
@@ -157,8 +184,8 @@ class GazeModel private constructor(
 
         private fun dot(a: DoubleArray, b: DoubleArray) = a.indices.sumOf { a[it] * b[it] }
 
-        /** Résout (XᵀX + λI)β = Xᵀy ; le terme constant n'est pas régularisé. */
-        private fun ridge(rows: List<DoubleArray>, y: List<Double>, lambda: Double): DoubleArray? {
+        /** Résout (XᵀX + λ·diag(pénalités))β = Xᵀy ; le terme constant n'est pas régularisé. */
+        private fun ridge(rows: List<DoubleArray>, y: List<Double>, lambda: Double, penalty: DoubleArray): DoubleArray? {
             val k = rows.first().size
             val a = Array(k) { DoubleArray(k) }
             val b = DoubleArray(k)
@@ -168,7 +195,7 @@ class GazeModel private constructor(
                     for (j in 0 until k) a[i][j] += x[i] * x[j]
                 }
             }
-            for (i in 1 until k) a[i][i] += lambda
+            for (i in 1 until k) a[i][i] += lambda * penalty[i - 1]
             return solve(a, b)
         }
 

@@ -58,6 +58,33 @@ class GazeMathTest {
     }
 
     @Test
+    fun smallHeadMoveAfterCalibration_doesNotMakeTheCursorJump() {
+        // Cas mesuré sur la tablette : tête presque immobile pendant la calibration (écart-type 0,002),
+        // regard vertical surtout visible par les paupières, puis tête décalée de ~2 mm à la vérification
+        val rnd = Random(3)
+        fun features(tx: Double, ty: Double, faceShift: Double = 0.0): DoubleArray {
+            val gx = (tx - 0.5) * 0.12 + rnd.nextDouble(-0.002, 0.002)
+            val gy = -0.06 + (ty - 0.5) * 0.01 + rnd.nextDouble(-0.002, 0.002)
+            val lid = 0.4 + (ty - 0.5) * 0.25 + rnd.nextDouble(-0.01, 0.01)
+            val open = 0.32 - (ty - 0.5) * 0.08 + rnd.nextDouble(-0.005, 0.005)
+            return GazeFeatures(
+                // La tête suit un peu le regard (quelques millimètres vers la cible), comme mesuré
+                gx, gy, headX = 0.05 + 0.006 * (tx - 0.5) + rnd.nextDouble(-0.001, 0.001), headY = 0.40 + 0.008 * (ty - 0.5) + rnd.nextDouble(-0.001, 0.001) + faceShift,
+                faceX = 0.53 + 0.003 * (tx - 0.5) + rnd.nextDouble(-0.001, 0.001) + faceShift, faceY = 0.68 + 0.006 * (ty - 0.5) + rnd.nextDouble(-0.001, 0.001) + faceShift,
+                faceSize = 0.18, eyeOpenness = open, lidRatio = lid, meanOpenness = open
+            ).regressors()
+        }
+        val grid = (0 until 3).flatMap { r -> (0 until 6).map { c -> (0.08 + c * 0.17) to (0.2 + r * 0.3) } }
+        val model = GazeModel.fit(grid.map { (x, y) -> GazeSample(features(x, y), x, y) })!!
+        // Vérification avec la tête légèrement déplacée : l'erreur reste petite (avant la correction : ~0,3 de l'écran)
+        val errors = listOf(0.25 to 0.35, 0.75 to 0.35, 0.5 to 0.65, 0.25 to 0.8, 0.75 to 0.8).map { (x, y) ->
+            val (px, py) = model.predict(features(x, y, faceShift = 0.01))
+            kotlin.math.hypot(px - x, py - y)
+        }
+        assertTrue("erreur après un petit mouvement de tête : ${errors.average()}", errors.average() < 0.08)
+    }
+
+    @Test
     fun notEnoughPoints_noModel() {
         val few = listOf(GazeSample(doubleArrayOf(0.0, 0.0), 0.5, 0.5), GazeSample(doubleArrayOf(1.0, 1.0), 0.6, 0.6))
         assertNull(GazeModel.fit(few))

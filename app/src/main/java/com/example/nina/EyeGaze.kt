@@ -50,7 +50,7 @@ private enum class CalibrationMode(val label: String) {
     GENERAL("Calibration générale")         // 9 points répartis sur l'écran
 }
 
-private enum class GazeScreen { HOME, CALIBRATION, RESULT, VERIFICATION, TRIAL }
+private enum class GazeScreen { HOME, CALIBRATION, CHECK, RESULT, VERIFICATION, TRIAL }
 
 private val Accent = Color(0xFF4A5D91)
 
@@ -81,6 +81,7 @@ fun EyeGazeDialog(
     var profile by remember { mutableStateOf(GazeStore.activeProfile(context)) }
     var pendingSamples by remember { mutableStateOf<List<GazeSample>>(emptyList()) }
     var plannedCount by remember { mutableIntStateOf(0) }
+    var checkCm by remember { mutableStateOf<Double?>(null) } // Vérification faite juste après la calibration
     val (widthCm, heightCm) = screenSizeCm()
     val centers = remember(pictoZones) { pictoZones.map { it.centerX to it.centerY } }
     val hasPictos = centers.size >= 5
@@ -111,30 +112,49 @@ fun EyeGazeDialog(
                     val targets = remember(mode) { targetsFor(mode) }
                     CalibrationRun(
                         tracker = tracker, targets = targets,
+                        previousSamples = if (mode == CalibrationMode.REFINE) profile?.samples.orEmpty() else emptyList(),
+                        previousModel = remember(profile) { profile?.model() },
                         onFinished = { samples ->
                             plannedCount = targets.size
                             // Retouche : les nouvelles mesures remplacent les anciennes aux mêmes endroits, le reste est gardé
                             pendingSamples = if (mode == CalibrationMode.REFINE) GazeCalibrationPlan.merge(profile?.samples.orEmpty(), samples) else samples
-                            screen = GazeScreen.RESULT
+                            checkCm = null
+                            screen = if (pendingSamples.size >= 6) GazeScreen.CHECK else GazeScreen.RESULT
                         },
                         onCancel = { screen = GazeScreen.HOME }
+                    )
+                }
+                GazeScreen.CHECK -> {
+                    // Vérification immédiate sur 5 pictos, avec la nouvelle calibration : la vraie précision à attendre
+                    val model = remember(pendingSamples) { GazeModel.fit(pendingSamples) }
+                    if (model == null) screen = GazeScreen.RESULT
+                    else VerificationRun(
+                        tracker = tracker, model = model,
+                        targets = if (hasPictos) GazeCalibrationPlan.pickRefineTargets(centers, 5) else GazeTargets.verification5,
+                        widthCm = widthCm, heightCm = heightCm,
+                        title = "Vérification de la nouvelle calibration",
+                        onResult = { checkCm = it; screen = GazeScreen.RESULT },
+                        onClose = { screen = GazeScreen.RESULT }
                     )
                 }
                 GazeScreen.RESULT -> {
                     val error = remember(pendingSamples) { GazeModel.leaveOneOutError(pendingSamples, widthScale = widthCm, heightScale = heightCm) }
                     val newPoints = if (mode == CalibrationMode.REFINE) pendingSamples.size - (profile?.samples?.size ?: 0) else pendingSamples.size
+                    val pendingModel = remember(pendingSamples) { GazeModel.fit(pendingSamples) }
                     CalibrationResult(
-                        mode = mode, measured = pendingSamples.size, planned = plannedCount, errorCm = error,
-                        refinedFrom = profile?.errorCm.takeIf { mode == CalibrationMode.REFINE },
+                        tracker = tracker, pendingModel = pendingModel,
+                        mode = mode, measured = pendingSamples.size, planned = plannedCount, errorCm = error, checkCm = checkCm,
+                        refinedFrom = (profile?.checkCm ?: profile?.errorCm).takeIf { mode == CalibrationMode.REFINE },
                         enoughPoints = pendingSamples.size >= 6 && (mode == CalibrationMode.REFINE || newPoints >= 6),
                         onSave = {
-                            val saved = GazeProfile("Principal", pendingSamples, System.currentTimeMillis(), error)
+                            val saved = GazeProfile("Principal", pendingSamples, System.currentTimeMillis(), error, checkCm, GazeFeatures.FEATURE_VERSION)
                             GazeStore.saveProfile(context, saved)
                             profile = saved
                             onProfileChanged()
                             screen = GazeScreen.HOME
                         },
                         onRetry = { screen = GazeScreen.CALIBRATION },
+                        onRecheck = { screen = GazeScreen.CHECK },
                         onCancel = { screen = GazeScreen.HOME }
                     )
                 }
@@ -223,7 +243,8 @@ private fun GazeHome(
                     else {
                         Text("${profile.samples.size} points mesurés")
                         Text("Mise à jour le ${DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.SHORT).format(Date(profile.updatedAt))}", fontSize = 13.sp, color = Color.Gray)
-                        profile.errorCm?.let { Text(precisionText(it), fontWeight = FontWeight.Bold) }
+                        (profile.checkCm ?: profile.errorCm)?.let { Text(precisionText(it), fontWeight = FontWeight.Bold) }
+                        if (profile.checkCm != null) Text("(mesurée par la vérification après la calibration)", fontSize = 12.sp, color = Color.Gray)
                     }
                 }
             }
@@ -334,11 +355,18 @@ private fun GazeTarget(x: Double, y: Double, collecting: Boolean) {
 
 /** Calibration : les cibles l'une après l'autre ; pour chacune, médiane des images où les yeux sont visibles. */
 @Composable
-private fun CalibrationRun(tracker: GazeTracker, targets: List<Pair<Double, Double>>, onFinished: (List<GazeSample>) -> Unit, onCancel: () -> Unit) {
+private fun CalibrationRun(
+    tracker: GazeTracker, targets: List<Pair<Double, Double>>,
+    previousSamples: List<GazeSample>, previousModel: GazeModel?,
+    onFinished: (List<GazeSample>) -> Unit, onCancel: () -> Unit
+) {
     var index by remember { mutableIntStateOf(0) }
     var collecting by remember { mutableStateOf(false) }
     var waitingForFace by remember { mutableStateOf(false) }
     val frame by tracker.frames.collectAsState()
+    // Rond orange pour l'adulte : d'abord la calibration précédente (s'il y en a une),
+    // puis la nouvelle dès 6 points mesurés, recalculée après chaque point
+    var liveModel by remember { mutableStateOf(previousModel) }
 
     LaunchedEffect(targets) {
         val samples = mutableListOf<GazeSample>()
@@ -356,6 +384,8 @@ private fun CalibrationRun(tracker: GazeTracker, targets: List<Pair<Double, Doub
                 }
             }
             if (frames.size >= 8) medianFeatures(frames)?.let { samples += GazeSample(it, tx, ty) }
+            val soFar = GazeCalibrationPlan.merge(previousSamples, samples)
+            if (soFar.size >= 6) GazeModel.fit(soFar)?.let { liveModel = it }
         }
         onFinished(samples)
     }
@@ -363,21 +393,36 @@ private fun CalibrationRun(tracker: GazeTracker, targets: List<Pair<Double, Doub
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF263238))) {
         val (tx, ty) = targets[index]
         GazeTarget(tx, ty, collecting)
+        liveModel?.let { m ->
+            val point by rememberGazePoint(tracker, m)
+            GazeCursor(point)
+        }
         Text(
             if (waitingForFace && collecting) "Je ne vois pas les yeux… regarde l'étoile !" else "Regarde l'étoile ⭐  (${index + 1} / ${targets.size})",
             color = Color.White, fontSize = 20.sp,
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 24.dp)
         )
         if (frame?.faceDetected == false) Text("Aucun visage détecté", color = Color(0xFFFFAB91), modifier = Modifier.align(Alignment.Center))
+        Text(
+            "Rond orange : où l'app estime le regard (${if (liveModel == null) "apparaît après 6 points" else "mis à jour à chaque point"})",
+            color = Color(0xFFFFCC80), fontSize = 14.sp,
+            modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)
+        )
         TextButton(onClick = onCancel, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)) { Text("Annuler", color = Color.White) }
     }
 }
 
 @Composable
 private fun CalibrationResult(
-    mode: CalibrationMode, measured: Int, planned: Int, errorCm: Double?, refinedFrom: Double?, enoughPoints: Boolean,
-    onSave: () -> Unit, onRetry: () -> Unit, onCancel: () -> Unit
+    tracker: GazeTracker, pendingModel: GazeModel?,
+    mode: CalibrationMode, measured: Int, planned: Int, errorCm: Double?, checkCm: Double?, refinedFrom: Double?, enoughPoints: Boolean,
+    onSave: () -> Unit, onRetry: () -> Unit, onRecheck: () -> Unit, onCancel: () -> Unit
 ) {
+    // Rond orange : l'adulte peut regarder quelques pictos et juger par lui-même avant d'enregistrer
+    pendingModel?.let { m ->
+        val point by rememberGazePoint(tracker, m)
+        GazeCursor(point)
+    }
     Column(
         modifier = Modifier.fillMaxSize().padding(48.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
@@ -394,11 +439,17 @@ private fun CalibrationResult(
                 "Pas assez de points : les yeux n'étaient pas assez visibles. Vérifiez la lumière et la distance, puis recommencez.",
                 color = Color(0xFFC62828), textAlign = TextAlign.Center
             )
-            errorCm != null -> {
-                Text(precisionText(errorCm), fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            else -> {
+                val main = checkCm ?: errorCm
+                if (main != null) Text(precisionText(main), fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Text(
+                    "Vérification après calibration : ${checkCm?.let { "%.1f cm".format(it) } ?: "non mesurée"}   ·   " +
+                    "pendant la calibration : ${errorCm?.let { "%.1f cm".format(it) } ?: "—"}",
+                    color = Color.DarkGray
+                )
                 refinedFrom?.let { Text("Avant la retouche : %.1f cm".format(it), color = Color.Gray) }
                 Text(
-                    "Cette estimation est mesurée « entre » les points. Sur les pictos eux-mêmes, la correction locale et l'aimant font mieux.",
+                    "La vérification compte : c'est la précision réelle. Le rond orange suit votre regard : regardez quelques pictos pour juger avant d'enregistrer.",
                     fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center
                 )
             }
@@ -406,6 +457,7 @@ private fun CalibrationResult(
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = onCancel) { Text("Annuler") }
             OutlinedButton(onClick = onRetry) { Text("Recommencer") }
+            if (enoughPoints) OutlinedButton(onClick = onRecheck) { Text("Vérifier à nouveau") }
             Button(onClick = onSave, enabled = enoughPoints, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("Enregistrer") }
         }
     }
@@ -452,7 +504,10 @@ fun GazeCursor(point: Pair<Double, Double>?) {
 @Composable
 private fun VerificationRun(
     tracker: GazeTracker, model: GazeModel, targets: List<Pair<Double, Double>>,
-    widthCm: Double, heightCm: Double, onClose: () -> Unit
+    widthCm: Double, heightCm: Double,
+    title: String = "Vérification",
+    onResult: ((Double?) -> Unit)? = null, // Si présent : renvoie la précision mesurée dès la fin (vérification automatique)
+    onClose: () -> Unit
 ) {
     val point by rememberGazePoint(tracker, model)
     var index by remember { mutableIntStateOf(0) }
@@ -471,6 +526,7 @@ private fun VerificationRun(
             }
         }
         resultCm = errors.takeIf { it.isNotEmpty() }?.average()
+        onResult?.invoke(resultCm)
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFFFAF3E0))) {
@@ -481,7 +537,7 @@ private fun VerificationRun(
         GazeCursor(point)
         Column(modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                if (resultCm == null) "Regarde l'étoile ⭐  (${index + 1} / ${targets.size})" else "Sur les pictos : " + precisionText(resultCm!!),
+                if (resultCm == null) "$title : regarde l'étoile ⭐  (${index + 1} / ${targets.size})" else "Sur les pictos : " + precisionText(resultCm!!),
                 fontSize = 20.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.background(Color.White.copy(alpha = 0.85f), RoundedCornerShape(12.dp)).padding(horizontal = 16.dp, vertical = 8.dp)
             )
