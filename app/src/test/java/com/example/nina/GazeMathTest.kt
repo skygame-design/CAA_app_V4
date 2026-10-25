@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.random.Random
 
 class GazeMathTest {
@@ -82,6 +83,30 @@ class GazeMathTest {
             kotlin.math.hypot(px - x, py - y)
         }
         assertTrue("erreur après un petit mouvement de tête : ${errors.average()}", errors.average() < 0.08)
+    }
+
+    @Test
+    fun fixationFilter_holdsStillDuringFixation_andFollowsRealMoves() {
+        val rnd = Random(11)
+        val f = FixationFilter(radius = 0.07, jumpFrames = 3)
+        // Fixation sur (0.3 ; 0.4) avec un fort tremblement (±0.04) et des sauts isolés
+        val outs = (0 until 60).map { i ->
+            val spike = if (i % 13 == 0) 0.2 else 0.0
+            f.filter(0.3 + rnd.nextDouble(-0.04, 0.04) + spike, 0.4 + rnd.nextDouble(-0.04, 0.04))
+        }.drop(10)
+        val spread = outs.maxOf { hypot(it.first - 0.3, it.second - 0.4) }
+        assertTrue("pointeur stable pendant la fixation : écart max $spread", spread < 0.03)
+        // Vrai déplacement vers (0.7 ; 0.6) : suivi en quelques images
+        var out = 0.0 to 0.0
+        repeat(6) { out = f.filter(0.7 + rnd.nextDouble(-0.02, 0.02), 0.6 + rnd.nextDouble(-0.02, 0.02)) }
+        assertTrue("suit le déplacement : $out", hypot(out.first - 0.7, out.second - 0.6) < 0.04)
+    }
+
+    @Test
+    fun medianWindow_dropsIsolatedSpikes() {
+        val m = MedianWindow(5)
+        listOf(1.0, 1.1, 0.9, 9.0, 1.0).forEach { m.add(doubleArrayOf(it)) }
+        assertEquals(1.0, m.add(doubleArrayOf(1.05))[0], 0.06)
     }
 
     @Test

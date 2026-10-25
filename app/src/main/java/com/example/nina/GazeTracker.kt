@@ -48,6 +48,8 @@ class GazeTracker(private val context: Context) {
     private val executor = Executors.newSingleThreadExecutor()
     private var lastBrightness = 0.5
     private var frameCount = 0
+    private var lastFpsTime = 0L
+    private var resultCount = 0
     @Volatile private var running = false
 
     fun start(lifecycleOwner: LifecycleOwner) {
@@ -96,7 +98,8 @@ class GazeTracker(private val context: Context) {
                 cameraProvider = provider
                 @Suppress("DEPRECATION")
                 val analysis = ImageAnalysis.Builder()
-                    .setTargetResolution(android.util.Size(640, 480))
+                    // Plus de pixels par œil = iris repéré plus précisément (en 640 × 480, l'œil ne fait qu'une trentaine de pixels)
+                    .setTargetResolution(android.util.Size(1280, 960))
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                     .build()
@@ -134,8 +137,13 @@ class GazeTracker(private val context: Context) {
             GazeFeatures.from(pts.map { FacePoint(it.x(), it.y()) }, aspect = width.toFloat() / height.coerceAtLeast(1))
         }
         _frames.value = GazeFrame(SystemClock.uptimeMillis(), face != null, features, lastBrightness)
-        // Mesures de réglage (une fois par seconde environ), visibles avec « adb logcat -s Nina-Regard »
-        if (frameCount % 30 == 0) features?.let {
+        // Mesures de réglage toutes les 30 images analysées (compteur propre à ce fil de résultats)
+        if (++resultCount % 30 == 0) {
+            val now = SystemClock.uptimeMillis()
+            if (lastFpsTime > 0) Log.d("Nina-Regard", "%.1f images/s".format(30_000.0 / (now - lastFpsTime)))
+            lastFpsTime = now
+        }
+        if (resultCount % 30 == 0) features?.let {
             Log.d("Nina-Regard", "image ${width}x$height, taille visage=%.3f, ouverture yeux=%.2f, regard=(%.3f ; %.3f), lumière=%.2f"
                 .format(it.faceSize, it.eyeOpenness, it.gazeX, it.gazeY, lastBrightness))
         }

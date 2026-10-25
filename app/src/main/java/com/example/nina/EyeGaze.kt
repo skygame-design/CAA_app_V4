@@ -463,20 +463,26 @@ private fun CalibrationResult(
     }
 }
 
-/** Position du regard lissée, en coordonnées normalisées ; null si les yeux ne sont pas visibles. */
+/**
+ * Position du regard stabilisée, en coordonnées normalisées ; null si les yeux ne sont pas visibles.
+ * 1. médiane des 5 dernières mesures (un iris mal repéré sur une image est ignoré) ;
+ * 2. filtre de fixation : le pointeur reste immobile tant que le regard reste dans la même zone,
+ *    et ne se déplace que sur un vrai mouvement de l'œil.
+ */
 @Composable
 fun rememberGazePoint(tracker: GazeTracker, model: GazeModel): State<Pair<Double, Double>?> {
-    val fx = remember(model) { OneEuroFilter() }
-    val fy = remember(model) { OneEuroFilter() }
+    val median = remember(model) { MedianWindow(5) }
+    val fixation = remember(model) { FixationFilter() }
     val point = remember(model) { mutableStateOf<Pair<Double, Double>?>(null) }
     LaunchedEffect(model) {
         tracker.frames.filterNotNull().collect { f ->
             val feat = f.features
             if (f.usable && feat != null) {
-                val (x, y) = model.predict(feat.regressors())
-                point.value = clamp01(fx.filter(x, f.timeMs)) to clamp01(fy.filter(y, f.timeMs))
+                val (x, y) = model.predict(median.add(feat.regressors()))
+                val (sx, sy) = fixation.filter(clamp01(x), clamp01(y))
+                point.value = sx to sy
             } else if (!f.faceDetected) {
-                point.value = null; fx.reset(); fy.reset()
+                point.value = null; median.reset(); fixation.reset()
             }
         }
     }
@@ -512,9 +518,11 @@ private fun VerificationRun(
     val point by rememberGazePoint(tracker, model)
     var index by remember { mutableIntStateOf(0) }
     var resultCm by remember { mutableStateOf<Double?>(null) }
+    var jitterCm by remember { mutableStateOf<Double?>(null) }
 
     LaunchedEffect(Unit) {
         val errors = mutableListOf<Double>()
+        val jitters = mutableListOf<Double>()
         targets.forEachIndexed { i, (tx, ty) ->
             index = i
             delay(1000)
@@ -523,8 +531,12 @@ private fun VerificationRun(
             if (seen.size >= 5) {
                 val mx = seen.map { it.first }.average(); val my = seen.map { it.second }.average()
                 errors += kotlin.math.hypot((mx - tx) * widthCm, (my - ty) * heightCm)
+                // Stabilité : distance moyenne du pointeur à sa position moyenne pendant la fixation
+                jitters += seen.map { kotlin.math.hypot((it.first - mx) * widthCm, (it.second - my) * heightCm) }.average()
             }
         }
+        jitterCm = jitters.takeIf { it.isNotEmpty() }?.average()
+        android.util.Log.i("Nina-Regard", "Vérification : erreur %.2f cm, stabilité ± %.2f cm".format(errors.average(), jitterCm ?: -1.0))
         resultCm = errors.takeIf { it.isNotEmpty() }?.average()
         onResult?.invoke(resultCm)
     }
@@ -541,6 +553,12 @@ private fun VerificationRun(
                 fontSize = 20.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.background(Color.White.copy(alpha = 0.85f), RoundedCornerShape(12.dp)).padding(horizontal = 16.dp, vertical = 8.dp)
             )
+            jitterCm?.let {
+                Text(
+                    "Stabilité du pointeur : ± %.1f cm".format(it) + if (it < 1.0) " (stable)" else if (it < 2.0) " (un peu instable)" else " (instable)",
+                    fontSize = 16.sp, modifier = Modifier.background(Color.White.copy(alpha = 0.85f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+            }
             if (point == null) Text("Yeux non détectés", color = Color(0xFFC62828))
         }
         Button(onClick = onClose, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("Terminer") }

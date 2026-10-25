@@ -278,6 +278,58 @@ class OneEuroFilter(private val minCutoff: Double = 1.0, private val beta: Doubl
     fun reset() { last = null; lastDeriv = 0.0 }
 }
 
+/**
+ * Médiane glissante des dernières mesures : un point aberrant isolé (iris mal repéré sur une image) est ignoré.
+ */
+class MedianWindow(private val size: Int = 5) {
+    private val buffer = ArrayDeque<DoubleArray>()
+    fun add(v: DoubleArray): DoubleArray {
+        buffer.addLast(v)
+        while (buffer.size > size) buffer.removeFirst()
+        return medianFeatures(buffer.toList())!!
+    }
+    fun reset() = buffer.clear()
+}
+
+/**
+ * Filtre de fixation (comme le mode « stabilisé » des oculomètres) :
+ * tant que le regard reste dans un petit rayon, le pointeur reste à la position moyenne de cette fixation (immobile) ;
+ * il ne se déplace que lors d'un vrai mouvement de l'œil (point hors du rayon sur plusieurs images de suite).
+ *
+ * @param radius rayon d'une fixation, en fraction de l'écran
+ * @param jumpFrames nombre d'images consécutives hors du rayon pour accepter un déplacement (ignore les sauts isolés)
+ * @param window nombre de points moyennés au plus dans une fixation (les plus récents)
+ */
+class FixationFilter(private val radius: Double = 0.07, private val jumpFrames: Int = 3, private val window: Int = 20) {
+    private val points = ArrayDeque<Pair<Double, Double>>()
+    private val outside = mutableListOf<Pair<Double, Double>>()
+
+    private fun center(): Pair<Double, Double> = points.map { it.first }.average() to points.map { it.second }.average()
+
+    fun filter(x: Double, y: Double): Pair<Double, Double> {
+        if (points.isEmpty()) { points.addLast(x to y); return x to y }
+        val (cx, cy) = center()
+        if (hypot(x - cx, y - cy) <= radius) {
+            outside.clear()
+            points.addLast(x to y)
+            while (points.size > window) points.removeFirst()
+        } else {
+            outside += x to y
+            // Déplacement confirmé : les points hors du rayon sont proches les uns des autres → nouvelle fixation
+            if (outside.size >= jumpFrames) {
+                val ox = outside.map { it.first }.average(); val oy = outside.map { it.second }.average()
+                if (outside.all { hypot(it.first - ox, it.second - oy) <= radius }) {
+                    points.clear(); points.addAll(outside)
+                }
+                outside.clear()
+            }
+        }
+        return center()
+    }
+
+    fun reset() { points.clear(); outside.clear() }
+}
+
 /** Positions des cibles de calibration (coordonnées normalisées), dans l'ordre d'affichage. */
 object GazeTargets {
     val calibration9 = listOf(0.5 to 0.5, 0.08 to 0.1, 0.5 to 0.1, 0.92 to 0.1, 0.92 to 0.5, 0.92 to 0.9, 0.5 to 0.9, 0.08 to 0.9, 0.08 to 0.5)
