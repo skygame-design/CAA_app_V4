@@ -217,9 +217,10 @@ private val helpTopics = listOf(
                 "Déplacer un picto (glisser-déposer)", listOf(
                     "Cadenas ouvert, fais un appui long sur un picto puis glisse-le.",
                     "Lâché au centre d'une case : les deux pictos s'échangent.",
-                    "Lâché sur le bord gauche ou droit d'une case : il s'insère avant ou après.",
-                    "Lâché sur une colonne : il y est copié (mots essentiels ou phrases rapides).",
-                    "Pour l'emmener sur une autre page, garde-le une seconde sur le bouton ◀ ou ▶ : la page tourne."
+                    "Lâché sur le bord d'une case : il s'insère avant ou après (bord gauche ou droit dans la grille, haut ou bas dans les colonnes). Un trait bleu montre la place.",
+                    "Ça marche aussi à l'intérieur de la colonne des dossiers et de celle des phrases rapides.",
+                    "D'une zone à une autre (grille, dossiers, phrases rapides) : le picto y est copié, à l'endroit visé ; l'original reste à sa place.",
+                    "Pour l'emmener sur une autre page, garde-le une seconde sur le bouton ◀ ▶ (grille) ou ▲ ▼ (colonnes) : la page tourne."
                 )
             ),
             HelpTip("Referme le cadenas avant de rendre la tablette : le mode Édition se coupe automatiquement.")

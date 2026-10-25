@@ -178,7 +178,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
                     var sidebarRect by remember { mutableStateOf(value = Rect.Zero) }
                     var quickFiresRect by remember { mutableStateOf(value = Rect.Zero) }
+                    // Positions des cases visibles de chaque zone (pour savoir quelle case est survolée pendant un glisser-déposer)
                     val gridCellsBounds = remember { mutableMapOf<AACCell, Rect>() }
+                    val leftCellsBounds = remember { mutableMapOf<AACCell, Rect>() }
+                    val rightCellsBounds = remember { mutableMapOf<AACCell, Rect>() }
                     val dndState = LocalDragAndDropState.current
                     
                     var gridRect by remember { mutableStateOf(Rect.Zero) }
@@ -282,9 +285,15 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
                     // --- LOGIQUE DE DROP ---
                     val onDropRequest: (Offset, AACCell) -> Unit = { screenPos, droppedCell ->
+                        val overZone = when {
+                            sidebarRect.contains(screenPos) -> DropZone.CORE
+                            quickFiresRect.contains(screenPos) -> DropZone.QUICK
+                            gridRect.contains(screenPos) -> DropZone.GRID
+                            else -> null
+                        }
                         val outcome = applyDrop(
-                            droppedCell, dndState.currentTargetCell, dndState.currentDropMode,
-                            onCoreColumn = sidebarRect.contains(screenPos), onQuickColumn = quickFiresRect.contains(screenPos),
+                            droppedCell, dndState.sourceZone,
+                            dndState.currentTargetCell, dndState.currentTargetZone, dndState.currentDropMode, overZone,
                             coreWords = coreWords, quickFires = quickFires, grid = currentButtons
                         )
                         when (outcome) {
@@ -294,13 +303,16 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             DropOutcome.NONE -> {}
                         }
                         dndState.currentTargetCell = null
+                        dndState.currentTargetZone = null
                         dndState.currentDropMode = DropTargetMode.NONE
                     }
 
                     // Le gestionnaire de dépôt change à chaque recomposition (il travaille sur la liste affichée, accueil ou dossier) :
                     // le suivi du doigt, créé une seule fois, appelle toujours la version à jour
                     val currentOnDropRequest by rememberUpdatedState(onDropRequest)
-                    val rootModifier = Modifier.dragAndDropTracking(dndState, { gridRect }, gridCellsBounds) { pos, cell -> currentOnDropRequest(pos, cell) }
+                    val rootModifier = Modifier.dragAndDropTracking(dndState, {
+                        listOf(DropZone.CORE to leftCellsBounds, DropZone.GRID to gridCellsBounds, DropZone.QUICK to rightCellsBounds)
+                    }) { pos, cell -> currentOnDropRequest(pos, cell) }
 
                     Surface(
                         modifier = Modifier
@@ -458,7 +470,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                         cells = coreWords, openFolderId = navigationStack.firstOrNull()?.id, isHome = navigationStack.isEmpty(),
                                         ui = cellUi,
                                         paging = PagingUi(leftPage, { leftPage = it }, { if (it != leftLayout) leftLayout = it }, { previous, next -> leftPreviousRect = previous; leftNextRect = next }),
-                                        minItemHeight = sideItemHeight, gap = sideGap, onSpeak = speakButton,
+                                        minItemHeight = sideItemHeight, gap = sideGap, onSpeak = speakButton, cellBounds = leftCellsBounds,
                                         onHome = {
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                             speakText("Accueil", voicePitch, voiceRate)
@@ -502,7 +514,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             QuickPhrasesColumn(
                                 cells = quickFires, ui = cellUi,
                                 paging = PagingUi(rightPage, { rightPage = it }, { if (it != rightLayout) rightLayout = it }, { previous, next -> rightPreviousRect = previous; rightNextRect = next }),
-                                minItemHeight = sideItemHeight, gap = sideGap, onSpeak = speakButton,
+                                minItemHeight = sideItemHeight, gap = sideGap, onSpeak = speakButton, cellBounds = rightCellsBounds,
                                 lockButton = {
                                     // Cadenas discret : il faut le maintenir 2 s pour ouvrir le mode adulte
                                     HoldLockButton(

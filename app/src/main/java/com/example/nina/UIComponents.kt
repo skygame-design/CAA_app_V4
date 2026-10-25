@@ -214,29 +214,23 @@ fun AACCellView(
     val folderShape = remember { FolderTabShape() }
 
     val dndState = LocalDragAndDropState.current
-    val isTarget = dndState.currentTargetCell == cell
+    val isTarget = dndState.currentTargetCell?.id == cell.id
     val dropMode = dndState.currentDropMode
+    val vertical = dndState.targetVertical
 
     val visualFeedbackModifier = if (isTarget) {
         when (dropMode) {
             DropTargetMode.SWAP -> Modifier.border(4.dp, Color.Blue, RoundedCornerShape(12.dp))
+            // Trait bleu là où le picto sera inséré : à gauche / à droite dans la grille, au-dessus / en dessous dans les colonnes
             DropTargetMode.INSERT_BEFORE -> Modifier.drawWithContent {
                 drawContent()
-                drawLine(
-                    color = Color.Blue,
-                    start = Offset(0f, 0f),
-                    end = Offset(0f, size.height),
-                    strokeWidth = 16f
-                )
+                if (vertical) drawLine(Color.Blue, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 16f)
+                else drawLine(Color.Blue, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 16f)
             }
             DropTargetMode.INSERT_AFTER -> Modifier.drawWithContent {
                 drawContent()
-                drawLine(
-                    color = Color.Blue,
-                    start = Offset(size.width, 0f),
-                    end = Offset(size.width, size.height),
-                    strokeWidth = 16f
-                )
+                if (vertical) drawLine(Color.Blue, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 16f)
+                else drawLine(Color.Blue, Offset(size.width, 0f), Offset(size.width, size.height), strokeWidth = 16f)
             }
             else -> Modifier
         }
@@ -521,6 +515,9 @@ class DragAndDropState {
     var draggedCell by mutableStateOf<AACCell?>(value = null)
     var currentTargetCell by mutableStateOf<AACCell?>(null)
     var currentDropMode by mutableStateOf(DropTargetMode.NONE)
+    var sourceZone by mutableStateOf(DropZone.GRID) // Zone d'où part le picto glissé
+    var currentTargetZone by mutableStateOf<DropZone?>(null) // Zone de la case visée
+    var targetVertical by mutableStateOf(false) // Case visée dans une colonne : avant / après = au-dessus / en dessous
 }
 
 val LocalDragAndDropState = compositionLocalOf { DragAndDropState() }

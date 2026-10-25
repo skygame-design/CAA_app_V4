@@ -66,7 +66,7 @@ class PagingUi(
  */
 @Composable
 fun InteractiveCell(
-    cell: AACCell, ui: CellUi, gazeKey: String, modifier: Modifier,
+    cell: AACCell, ui: CellUi, zone: DropZone, gazeKey: String, modifier: Modifier,
     onClick: () -> Unit,
     onChildLongPress: (() -> Unit)? = null,
     highlighted: Boolean = false, // Dossier ouvert : encadré, l'enfant voit où il se trouve
@@ -91,6 +91,7 @@ fun InteractiveCell(
                 onClick = onClick,
                 onLongClick = {
                     if (ui.isAdminMode) {
+                        ui.dnd.sourceZone = zone
                         ui.dnd.draggedCell = cell
                         ui.dnd.dragOffset = posInRoot
                         ui.dnd.isDragging = true
@@ -195,7 +196,7 @@ fun GuideBanner(targetLabel: String, step: Int, total: Int, onStop: () -> Unit) 
 @Composable
 fun FolderColumn(
     cells: List<AACCell>, openFolderId: String?, isHome: Boolean, ui: CellUi, paging: PagingUi,
-    minItemHeight: Dp, gap: Dp, onSpeak: (String) -> Unit,
+    minItemHeight: Dp, gap: Dp, onSpeak: (String) -> Unit, cellBounds: MutableMap<AACCell, Rect>,
     onHome: () -> Unit, onCellClick: (AACCell) -> Unit, onCellLongPress: (AACCell) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -220,11 +221,13 @@ fun FolderColumn(
             modifier = Modifier.weight(1f).fillMaxWidth()
         ) { index, slotModifier ->
             val cell = cells[index]
+            DisposableEffect(cell) { onDispose { cellBounds.remove(cell) } }
             InteractiveCell(
-                cell, ui, "gauche_${cell.id}", slotModifier,
+                cell, ui, DropZone.CORE, "gauche_${cell.id}", slotModifier,
                 onClick = { onCellClick(cell) },
                 onChildLongPress = { onCellLongPress(cell) },
-                highlighted = cell.isFolder && openFolderId == cell.id
+                highlighted = cell.isFolder && openFolderId == cell.id,
+                onBounds = { cellBounds[cell] = it }
             )
         }
     }
@@ -263,7 +266,7 @@ fun CenterGrid(
                 onDispose { cellBounds.remove(cell) }
             }
             InteractiveCell(
-                cell, ui, "grille_${cell.id}", cellModifier,
+                cell, ui, DropZone.GRID, "grille_${cell.id}", cellModifier,
                 onClick = { onCellClick(cell) },
                 onChildLongPress = { onCellLongPress(cell) },
                 onBounds = { cellBounds[cell] = it }
@@ -276,6 +279,7 @@ fun CenterGrid(
 @Composable
 fun QuickPhrasesColumn(
     cells: List<AACCell>, ui: CellUi, paging: PagingUi, minItemHeight: Dp, gap: Dp, onSpeak: (String) -> Unit,
+    cellBounds: MutableMap<AACCell, Rect>,
     lockButton: @Composable () -> Unit,
     onCellClick: (AACCell) -> Unit,
     columnModifier: Modifier = Modifier
@@ -300,7 +304,12 @@ fun QuickPhrasesColumn(
             modifier = Modifier.weight(1f).fillMaxWidth().then(columnModifier)
         ) { index, slotModifier ->
             val cell = cells[index]
-            InteractiveCell(cell, ui, "droite_${cell.id}", slotModifier, onClick = { onCellClick(cell) })
+            DisposableEffect(cell) { onDispose { cellBounds.remove(cell) } }
+            InteractiveCell(
+                cell, ui, DropZone.QUICK, "droite_${cell.id}", slotModifier,
+                onClick = { onCellClick(cell) },
+                onBounds = { cellBounds[cell] = it }
+            )
         }
     }
 }
