@@ -16,6 +16,12 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Bibliothèques natives (détection du visage) seulement pour les tablettes ARM 64 bits et l'émulateur :
+        // divise la taille de l'application par deux environ
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -40,6 +46,11 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // Le modèle de détection du visage doit rester non compressé pour être lu directement depuis l'APK
+    androidResources {
+        noCompress += "task"
+    }
 }
 
 dependencies {
@@ -58,6 +69,11 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.google.code.gson:gson:2.11.0")
+
+    // --- COMMANDE OCULAIRE (caméra frontale + détection du visage et des iris, tout dans la tablette) ---
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("com.google.mediapipe:tasks-vision:0.10.14")
 
     // --- ICONES ---
     implementation("androidx.compose.material:material-icons-extended")

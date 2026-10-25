@@ -203,6 +203,25 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     val prefs = context.getSharedPreferences("nina_prefs", Context.MODE_PRIVATE)
                     var showRecommendedDialog by remember { mutableStateOf(false) }
                     var showAutoBackups by remember { mutableStateOf(false) }
+
+                    // --- COMMANDE OCULAIRE ---
+                    val gazeTracker = remember { GazeTracker(applicationContext) }
+                    DisposableEffect(Unit) { onDispose { gazeTracker.close() } }
+                    var showEyeGaze by remember { mutableStateOf(false) }
+                    var gazeCursorEnabled by remember { mutableStateOf(GazeStore.cursorEnabled(context)) }
+                    var gazeProfileVersion by remember { mutableIntStateOf(0) } // Change à chaque nouvelle calibration
+                    val gazeModel = remember(gazeProfileVersion) { GazeStore.activeProfile(context)?.model() }
+                    var hasCameraPermission by remember {
+                        mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                    }
+                    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> hasCameraPermission = granted }
+                    // La caméra ne tourne que si la fenêtre de commande oculaire est ouverte ou si le curseur est affiché
+                    val gazeCursorActive = gazeCursorEnabled && gazeModel != null && !showEyeGaze
+                    val needCamera = hasCameraPermission && (showEyeGaze || gazeCursorActive)
+                    DisposableEffect(needCamera) {
+                        if (needCamera) gazeTracker.start(this@MainActivity)
+                        onDispose { gazeTracker.stop() }
+                    }
                     var showVoiceHelp by remember { mutableStateOf(false) }
                     var hasPreviousLayout by remember { mutableStateOf(prefs.contains("layout_before_recommended")) }
                     val applyLayout: (NinaBackup) -> Unit = { layout ->
@@ -431,6 +450,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                 onRestore = { openDocLauncher.launch(arrayOf("application/json")) },
                                 onRecommendedLayout = { showRecommendedDialog = true },
                                 onAutoBackups = { showAutoBackups = true },
+                                onEyeGaze = { showEyeGaze = true },
                                 voiceWarning = when (voiceStatus) {
                                     VoiceStatus.NETWORK_ONLY -> "Voix française seulement avec internet"
                                     VoiceStatus.MISSING -> "Voix française absente"
@@ -781,6 +801,23 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             }
                         }
                         }
+                    }
+
+                    if (gazeCursorActive && gazeModel != null) {
+                        val gazePoint by rememberGazePoint(gazeTracker, gazeModel)
+                        GazeCursor(gazePoint)
+                    }
+
+                    if (showEyeGaze) {
+                        EyeGazeDialog(
+                            tracker = gazeTracker,
+                            hasCameraPermission = hasCameraPermission,
+                            onRequestPermission = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
+                            cursorEnabled = gazeCursorEnabled,
+                            onCursorEnabledChange = { gazeCursorEnabled = it; GazeStore.setCursorEnabled(context, it) },
+                            onProfileChanged = { gazeProfileVersion++ },
+                            onDismiss = { showEyeGaze = false }
+                        )
                     }
 
                     if (showAutoBackups) {
@@ -1172,6 +1209,7 @@ fun AdminToolbar(
     onBackup: () -> Unit, onRestore: () -> Unit,
     onRecommendedLayout: () -> Unit, onRestorePreviousLayout: (() -> Unit)?, // null : rien à restaurer
     onAutoBackups: () -> Unit,
+    onEyeGaze: () -> Unit,
     voiceWarning: String?, onVoiceFix: () -> Unit, // null : la voix fonctionne hors ligne
     onLock: () -> Unit,
     modifier: Modifier = Modifier
@@ -1235,6 +1273,7 @@ fun AdminToolbar(
         Box {
             IconButton(onClick = { onMoreToggle(true) }) { Icon(Icons.Default.MoreVert, contentDescription = "Plus d'outils") }
             DropdownMenu(expanded = showMore, onDismissRequest = { onMoreToggle(false) }) {
+                DropdownMenuItem(text = { Text("👁 Commande oculaire…") }, onClick = { onMoreToggle(false); onEyeGaze() })
                 DropdownMenuItem(text = { Text("🎯 Calibrer le tactile") }, onClick = { onMoreToggle(false); onCalibration() })
                 DropdownMenuItem(text = { Text(if (isKioskMode) "🔓 Désactiver le mode Kiosque" else "🔒 Activer le mode Kiosque") }, onClick = { onMoreToggle(false); onKioskToggle() })
                 HorizontalDivider()
