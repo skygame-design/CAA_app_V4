@@ -224,6 +224,16 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     // La caméra ne tourne que si la fenêtre de commande oculaire est ouverte, ou si le regard est utilisé sur l'écran principal
                     val gazeActive = (gazeCursorEnabled || gazeSelectionEnabled) && gazeModel != null && !showEyeGaze
                     val needCamera = hasCameraPermission && (showEyeGaze || gazeActive)
+                    // Grille adaptée au regard et sélection en deux temps (réglages de la fenêtre Commande oculaire)
+                    val gazeGrid = remember(gazeProfileVersion) { GazeStore.gazeGrid(context) }
+                    val gazeGridColumns = remember(gazeProfileVersion) { GazeStore.gazeGridColumns(context) }
+                    val gazeTwoStep = remember(gazeProfileVersion) { GazeStore.twoStep(context) }
+                    val gazeGridOn = gazeActive && gazeSelectionEnabled && gazeGrid
+                    val gazeZoom = remember { GazeZoom() }
+                    LaunchedEffect(gazeTwoStep, gazeActive) { if (!gazeTwoStep || !gazeActive) gazeZoom.active = false }
+                    val gazeZoomScale by androidx.compose.animation.core.animateFloatAsState(
+                        if (gazeZoom.active) GazeZoom.SCALE else 1f, androidx.compose.animation.core.tween(300), label = "zoomRegard"
+                    )
                     DisposableEffect(needCamera) {
                         if (needCamera) gazeTracker.start(this@MainActivity)
                         onDispose { gazeTracker.stop() }
@@ -425,7 +435,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         // Depuis Android 15, l'app est dessinée sous les barres système : on réserve leur place
                         // (barre d'état en haut, barre de navigation à 3 boutons en bas ou sur le côté, encoche)
                         // pour qu'elles ne cachent aucun bouton. Le fond de couleur, lui, va jusqu'aux bords.
-                        Box(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+                        Box(modifier = Modifier
+                            .fillMaxSize()
+                            // Sélection en deux temps : l'écran est agrandi autour du point fixé
+                            .graphicsLayer {
+                                scaleX = gazeZoomScale; scaleY = gazeZoomScale
+                                transformOrigin = TransformOrigin(gazeZoom.originX, gazeZoom.originY)
+                            }
+                            .safeDrawingPadding()) {
                         // --- BARRE DU MODE ADULTE (visible seulement cadenas ouvert, hors de la zone de l'enfant) ---
                         if (isAdminMode) {
                             AdminToolbar(
@@ -690,7 +707,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             // Grille sans défilement : de 1 à 8 pictos par rangée, des pages si tout ne tient pas
                                             PagedGrid(
                                                 cells = targetButtons,
-                                                columns = columnCount,
+                                                // Regard : moins de pictos par rangée et de grands espaces entre les cases
+                                                columns = if (gazeGridOn) minOf(columnCount, gazeGridColumns) else columnCount,
+                                                gap = if (gazeGridOn) 40.dp else 16.dp,
                                                 page = gridPage,
                                                 onPageChange = { gridPage = it },
                                                 onLayout = { if (it != gridLayout) gridLayout = it },
@@ -840,6 +859,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             dwellMs = gazeDwellMs,
                             showRawPoint = gazeCursorEnabled,
                             learningEnabled = !isAdminMode && !anyDialogOpen,
+                            zoom = if (gazeTwoStep) gazeZoom else null,
                             onDriftLearned = { dx, dy ->
                                 // Décalage appris pendant l'utilisation : enregistré dans le profil (sans relancer le suivi)
                                 gazeProfile?.let { GazeStore.saveProfile(context, it.copy(offsetX = it.offsetX + dx, offsetY = it.offsetY + dy)) }

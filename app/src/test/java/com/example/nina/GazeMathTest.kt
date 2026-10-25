@@ -157,6 +157,51 @@ class GazeMathTest {
     }
 
     @Test
+    fun headCompensation_removesTheDriftCausedByTurningTheHead() {
+        // Modèle « physique » : les yeux tournent en sens inverse de la tête pour garder la cible.
+        // gazeX = 0,4 × (regard voulu − 0,5) − 0,35 × rotation gauche-droite ; gazeY de même avec la rotation haut-bas
+        val rnd = Random(8)
+        fun frame(tx: Double, ty: Double, yaw: Double, pitch: Double) = GazeFeatures(
+            gazeX = 0.4 * (tx - 0.5) - 0.35 * yaw + rnd.nextDouble(-0.003, 0.003),
+            gazeY = 0.25 * (ty - 0.5) - 0.2 * pitch + rnd.nextDouble(-0.003, 0.003),
+            headX = 0.05 + 0.6 * yaw, headY = 0.4 + 0.5 * pitch, faceX = 0.5, faceY = 0.6, faceSize = 0.2,
+            eyeOpenness = 0.3, lidRatio = 0.45, meanOpenness = 0.3, yaw = yaw, pitch = pitch
+        )
+        // Étape « tourne la tête » : la cible ne bouge pas, la tête tourne de ±8° dans les deux sens
+        val motion = (0 until 120).map { i ->
+            val a = i / 120.0 * 2 * Math.PI
+            frame(0.5, 0.5, yaw = 0.14 * kotlin.math.sin(a), pitch = 0.12 * kotlin.math.sin(2 * a))
+        }
+        val comp = HeadCompensation.fit(motion)!!
+        assertEquals(-0.35, comp.yawSlopes[0], 0.03)
+        assertEquals(-0.2, comp.pitchSlopes[1], 0.03)
+        // Calibration tête immobile, puis utilisation la tête tournée de 6° : la compensation garde le pointeur en place
+        val grid = (0 until 3).flatMap { r -> (0 until 5).map { c -> (0.1 + c * 0.2) to (0.2 + r * 0.3) } }
+        fun errorAfterTurn(c: HeadCompensation?): Double {
+            fun regs(f: GazeFeatures) = (c?.apply(f) ?: f).regressors()
+            val model = GazeModel.fit(grid.map { (x, y) -> GazeSample(regs(frame(x, y, 0.0, 0.0)), x, y) }, compensation = c)!!
+            return grid.map { (x, y) ->
+                val (px, py) = model.predict(model.regressorsOf(frame(x, y, yaw = 0.1, pitch = 0.0)))
+                hypot(px - x, py - y)
+            }.average()
+        }
+        val without = errorAfterTurn(null); val with = errorAfterTurn(comp)
+        assertTrue("avec compensation $with, sans $without", with < without * 0.3)
+        // Tête immobile pendant l'étape : rien à mesurer
+        assertNull(HeadCompensation.fit((0 until 60).map { frame(0.5, 0.5, 0.0, 0.0) }))
+    }
+
+    @Test
+    fun anglesFromMatrix_readsYawAndPitch() {
+        // Rotation de 0,3 rad autour de l'axe vertical : le visage regarde de côté
+        val c = kotlin.math.cos(0.3).toFloat(); val s = kotlin.math.sin(0.3).toFloat()
+        val m = floatArrayOf(c, 0f, -s, 0f, 0f, 1f, 0f, 0f, s, 0f, c, 0f, 0f, 0f, -40f, 1f)
+        val (yaw, pitch) = HeadCompensation.anglesFromMatrix(m)!!
+        assertEquals(0.3, yaw, 1e-5)
+        assertEquals(0.0, pitch, 1e-5)
+    }
+
+    @Test
     fun notEnoughPoints_noModel() {
         val few = listOf(GazeSample(doubleArrayOf(0.0, 0.0), 0.5, 0.5), GazeSample(doubleArrayOf(1.0, 1.0), 0.6, 0.6))
         assertNull(GazeModel.fit(few))

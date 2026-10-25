@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -50,7 +51,7 @@ private enum class CalibrationMode(val label: String) {
     GENERAL("Calibration générale")         // 9 points répartis sur l'écran
 }
 
-private enum class GazeScreen { HOME, CALIBRATION, CHECK, RESULT, VERIFICATION, TRIAL, RECENTER }
+private enum class GazeScreen { HOME, HEAD_MOTION, CALIBRATION, CHECK, RESULT, VERIFICATION, TRIAL, RECENTER }
 
 private val Accent = Color(0xFF4A5D91)
 
@@ -83,6 +84,7 @@ fun EyeGazeDialog(
     var plannedCount by remember { mutableIntStateOf(0) }
     var checkCm by remember { mutableStateOf<Double?>(null) } // Vérification faite juste après la calibration
     var pendingFaceSize by remember { mutableStateOf<Double?>(null) } // Distance (taille du visage) pendant la calibration
+    var pendingCompensation by remember { mutableStateOf<HeadCompensation?>(null) } // Rotation de la tête, mesurée avant les cibles
     // Distance de référence de la calibration en cours : retouche = moyenne pondérée avec l'ancienne
     fun pendingRef(newPoints: Int): Double? {
         val old = profile?.refFaceSize
@@ -119,16 +121,27 @@ fun EyeGazeDialog(
                         profile = GazeStore.activeProfile(context)
                         onProfileChanged()
                     },
-                    onCalibrate = { m -> mode = m; screen = GazeScreen.CALIBRATION },
+                    onCalibrate = { m ->
+                        mode = m
+                        // Retouche : on garde la compensation de la tête de la calibration complétée (mesures comparables)
+                        if (m == CalibrationMode.REFINE) { pendingCompensation = profile?.headCompensation; screen = GazeScreen.CALIBRATION }
+                        else screen = GazeScreen.HEAD_MOTION
+                    },
+                    onSettingsChanged = onProfileChanged,
                     onVerify = { screen = GazeScreen.VERIFICATION },
                     onTrial = { screen = GazeScreen.TRIAL },
                     onRecenter = { screen = GazeScreen.RECENTER },
                     onDismiss = onDismiss
                 )
+                GazeScreen.HEAD_MOTION -> HeadMotionRun(
+                    tracker = tracker,
+                    onFinished = { pendingCompensation = it; screen = GazeScreen.CALIBRATION },
+                    onCancel = { screen = GazeScreen.HOME }
+                )
                 GazeScreen.CALIBRATION -> {
                     val targets = remember(mode) { targetsFor(mode) }
                     CalibrationRun(
-                        tracker = tracker, targets = targets,
+                        tracker = tracker, targets = targets, compensation = pendingCompensation,
                         previousSamples = if (mode == CalibrationMode.REFINE) profile?.samples.orEmpty() else emptyList(),
                         previousModel = remember(profile) { profile?.model() },
                         previousCorrection = profile?.correction() ?: GazeCorrection(),
@@ -145,7 +158,7 @@ fun EyeGazeDialog(
                 }
                 GazeScreen.CHECK -> {
                     // Vérification immédiate sur 5 pictos, avec la nouvelle calibration : la vraie précision à attendre
-                    val model = remember(pendingSamples) { GazeModel.fit(pendingSamples) }
+                    val model = remember(pendingSamples) { GazeModel.fit(pendingSamples, compensation = pendingCompensation) }
                     if (model == null) screen = GazeScreen.RESULT
                     else VerificationRun(
                         tracker = tracker, model = model, correction = GazeCorrection(pendingRef(plannedCount)),
@@ -159,7 +172,7 @@ fun EyeGazeDialog(
                 GazeScreen.RESULT -> {
                     val error = remember(pendingSamples) { GazeModel.leaveOneOutError(pendingSamples, widthScale = widthCm, heightScale = heightCm) }
                     val newPoints = if (mode == CalibrationMode.REFINE) pendingSamples.size - (profile?.samples?.size ?: 0) else pendingSamples.size
-                    val pendingModel = remember(pendingSamples) { GazeModel.fit(pendingSamples) }
+                    val pendingModel = remember(pendingSamples) { GazeModel.fit(pendingSamples, compensation = pendingCompensation) }
                     CalibrationResult(
                         tracker = tracker, pendingModel = pendingModel, pendingCorrection = GazeCorrection(pendingRef(plannedCount)),
                         mode = mode, measured = pendingSamples.size, planned = plannedCount, errorCm = error, checkCm = checkCm,
@@ -169,7 +182,7 @@ fun EyeGazeDialog(
                             // Nouvelle calibration : distance de référence mesurée, décalage remis à zéro
                             val saved = GazeProfile(
                                 GazeStore.profileName(tracker.fineIris), pendingSamples, System.currentTimeMillis(), error, checkCm, GazeFeatures.FEATURE_VERSION,
-                                refFaceSize = pendingRef(plannedCount)
+                                refFaceSize = pendingRef(plannedCount), headCompensation = pendingCompensation
                             )
                             GazeStore.saveProfile(context, saved)
                             profile = saved
@@ -222,7 +235,7 @@ private fun GazeHome(
     pictoCount: Int,
     cursorEnabled: Boolean, onCursorEnabledChange: (Boolean) -> Unit,
     selectionEnabled: Boolean, onSelectionEnabledChange: (Boolean) -> Unit,
-    dwellMs: Long, onDwellMsChange: (Long) -> Unit, onFineIrisChange: (Boolean) -> Unit,
+    dwellMs: Long, onDwellMsChange: (Long) -> Unit, onFineIrisChange: (Boolean) -> Unit, onSettingsChanged: () -> Unit,
     onCalibrate: (CalibrationMode) -> Unit, onVerify: () -> Unit, onTrial: () -> Unit, onRecenter: () -> Unit, onDismiss: () -> Unit
 ) {
     val frame by tracker.frames.collectAsState()
@@ -345,6 +358,30 @@ private fun GazeHome(
                     "Pour l'adulte : un rond orange montre où l'app estime le regard, avant l'aimant vers les cases.",
                     cursorEnabled, profile != null && hasCameraPermission, onCursorEnabledChange
                 )
+                val context = LocalContext.current
+                var gazeGrid by remember { mutableStateOf(GazeStore.gazeGrid(context)) }
+                var gridColumns by remember { mutableIntStateOf(GazeStore.gazeGridColumns(context)) }
+                var twoStep by remember { mutableStateOf(GazeStore.twoStep(context)) }
+                SettingSwitch(
+                    "Grille adaptée au regard",
+                    "Quand la sélection par le regard est active : moins de pictos par rangée et de grands espaces entre les cases, pour des cibles plus faciles à garder.",
+                    gazeGrid, true
+                ) { gazeGrid = it; GazeStore.setGazeGrid(context, it); onSettingsChanged() }
+                if (gazeGrid) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Pictos par rangée, au plus", modifier = Modifier.width(220.dp))
+                    Slider(
+                        value = gridColumns.toFloat(),
+                        onValueChange = { gridColumns = it.toInt() },
+                        onValueChangeFinished = { GazeStore.setGazeGridColumns(context, gridColumns); onSettingsChanged() },
+                        valueRange = 2f..6f, steps = 3, modifier = Modifier.weight(1f)
+                    )
+                    Text("$gridColumns", modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
+                }
+                SettingSwitch(
+                    "Sélection en deux temps (zoom)",
+                    "Fixer une zone l'agrandit deux fois, puis fixer le picto agrandi l'active. Plus lent, mais bien plus sûr si le pointeur manque de précision.",
+                    twoStep, true
+                ) { twoStep = it; GazeStore.setTwoStep(context, it); onSettingsChanged() }
                 var fineIris by remember { mutableStateOf(tracker.fineIris) }
                 SettingSwitch(
                     "Repérage fin de l'iris (haute définition)",
@@ -408,10 +445,68 @@ private fun GazeTarget(x: Double, y: Double, collecting: Boolean) {
     }
 }
 
+/**
+ * Avant les cibles : les yeux restent sur l'étoile pendant que la tête tourne doucement dans les 4 directions.
+ * On mesure ainsi comment la rotation de la tête change les mesures des yeux, pour ensuite la compenser
+ * (c'est ce qui faisait dériver le pointeur quand la tête tournait un peu après la calibration).
+ */
+@Composable
+private fun HeadMotionRun(tracker: GazeTracker, onFinished: (HeadCompensation?) -> Unit, onCancel: () -> Unit) {
+    val steps = listOf(
+        "Garde les yeux sur l'étoile ⭐" to "",
+        "Tourne doucement la tête vers la gauche" to "⬅",
+        "… puis vers la droite" to "➡",
+        "… puis vers le haut" to "⬆",
+        "… puis vers le bas" to "⬇",
+        "Reviens au centre" to "⏺"
+    )
+    var step by remember { mutableIntStateOf(0) }
+    var result by remember { mutableStateOf<String?>(null) }
+    val frame by tracker.frames.collectAsState()
+
+    LaunchedEffect(Unit) {
+        val frames = mutableListOf<GazeFeatures>()
+        val collector = launch {
+            tracker.frames.filterNotNull().collect { f -> if (step > 0 && f.usable) f.features?.let { frames += it } }
+        }
+        steps.indices.forEach { i -> step = i; delay(if (i == 0) 1500 else 1800) }
+        collector.cancel()
+        val comp = HeadCompensation.fit(frames)
+        val yawDeg = frames.takeIf { it.size > 1 }?.let { fs -> Math.toDegrees(fs.maxOf { it.yaw } - fs.minOf { it.yaw }) } ?: 0.0
+        val pitchDeg = frames.takeIf { it.size > 1 }?.let { fs -> Math.toDegrees(fs.maxOf { it.pitch } - fs.minOf { it.pitch }) } ?: 0.0
+        android.util.Log.i(
+            "Nina-Regard", "Rotation de la tête : %d images, amplitude %.0f° / %.0f°, compensation %s".format(
+                frames.size, yawDeg, pitchDeg,
+                comp?.let { "pentes regard x %.2f / %.2f, y %.2f / %.2f".format(it.yawSlopes[0], it.pitchSlopes[0], it.yawSlopes[1], it.pitchSlopes[1]) } ?: "impossible"
+            )
+        )
+        result = if (comp != null) "Rotation de la tête mesurée ✓" else "La tête n'a pas assez bougé : calibration sans compensation"
+        delay(1200)
+        onFinished(comp)
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF263238))) {
+        GazeTarget(0.5, 0.5, step > 0)
+        Column(
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(result ?: steps[step].first, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            if (result == null) Text(steps[step].second, color = Color(0xFFFFCC80), fontSize = 48.sp)
+            Text(
+                "Les yeux ne quittent pas l'étoile : seule la tête bouge, un petit peu (comme pour dire « non », puis « oui »).",
+                color = Color(0xFFB0BEC5), fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 48.dp)
+            )
+        }
+        if (frame?.faceDetected == false) Text("Aucun visage détecté", color = Color(0xFFFFAB91), modifier = Modifier.align(Alignment.Center).padding(top = 140.dp))
+        TextButton(onClick = onCancel, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)) { Text("Annuler", color = Color.White) }
+    }
+}
+
 /** Calibration : les cibles l'une après l'autre ; pour chacune, médiane des images où les yeux sont visibles. */
 @Composable
 private fun CalibrationRun(
-    tracker: GazeTracker, targets: List<Pair<Double, Double>>,
+    tracker: GazeTracker, targets: List<Pair<Double, Double>>, compensation: HeadCompensation?,
     previousSamples: List<GazeSample>, previousModel: GazeModel?, previousCorrection: GazeCorrection,
     onFinished: (List<GazeSample>, Double?) -> Unit, onCancel: () -> Unit
 ) {
@@ -436,13 +531,13 @@ private fun CalibrationRun(
             withTimeoutOrNull(2500) {
                 tracker.frames.filterNotNull().first { f ->
                     waitingForFace = !f.usable
-                    if (f.usable) f.features?.let { frames += it.regressors(); faceSizes += it.faceSize }
+                    if (f.usable) f.features?.let { frames += (compensation?.apply(it) ?: it).regressors(); faceSizes += it.faceSize }
                     frames.size >= 24 // Arrête la collecte de cette cible
                 }
             }
             if (frames.size >= 8) medianFeatures(frames)?.let { samples += GazeSample(it, tx, ty) }
             val soFar = GazeCalibrationPlan.merge(previousSamples, samples)
-            if (soFar.size >= 6) GazeModel.fit(soFar)?.let { liveModel = it; liveCorrection = GazeCorrection(faceSizes.sorted().getOrNull(faceSizes.size / 2)) }
+            if (soFar.size >= 6) GazeModel.fit(soFar, compensation = compensation)?.let { liveModel = it; liveCorrection = GazeCorrection(faceSizes.sorted().getOrNull(faceSizes.size / 2)) }
         }
         onFinished(samples, faceSizes.sorted().getOrNull(faceSizes.size / 2))
     }
@@ -536,7 +631,7 @@ fun rememberGazePoint(tracker: GazeTracker, model: GazeModel, correction: GazeCo
         tracker.frames.filterNotNull().collect { f ->
             val feat = f.features
             if (f.usable && feat != null) {
-                val (rx, ry) = model.predict(median.add(feat.regressors()))
+                val (rx, ry) = model.predict(median.add(model.regressorsOf(feat)))
                 // Distance différente de celle de la calibration : on corrige (taille du visage lissée sur 9 images)
                 val (x, y) = correction.apply(rx, ry, faceSizes.add(doubleArrayOf(feat.faceSize))[0])
                 val (sx, sy) = fixation.filter(clamp01(x), clamp01(y))

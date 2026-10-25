@@ -67,12 +67,16 @@ class GazeMagnet(private val switchMs: Long = 250, private val margin: Double = 
 
 /**
  * Fixation : progression de 0 à 1 tant que la même zone reste visée ; à 1, la zone est activée une fois.
- * Tolérante : un écart bref (moins de graceMs) ne fait rien perdre ; au-delà, la progression redescend
+ * Tolérante : un écart bref (moins de graceMs) ne fait rien perdre, un passage dans l'espace vide entre les cases
+ * (aucune case visée) met seulement l'anneau en pause pendant gapPauseMs ; au-delà, la progression redescend
  * à la même vitesse qu'elle monte, et une autre case ne prend le relais qu'une fois l'anneau vidé.
  * Après une activation, il faut attendre cooldownMs avant que la même zone puisse se remplir à nouveau :
  * l'enfant ne « répète » pas un mot sans le vouloir.
  */
-class GazeDwell(var dwellMs: Long = 1200, private val cooldownMs: Long = 1500, private val graceMs: Long = 300) {
+class GazeDwell(
+    var dwellMs: Long = 1200, private val cooldownMs: Long = 1500, private val graceMs: Long = 300,
+    private val gapPauseMs: Long = 1000 // Point dans l'espace entre les cases : l'anneau se met en pause, sans se vider
+) {
     /** Zone dont l'anneau se remplit (peut différer un instant de la zone visée). */
     var zone: Int? = null
         private set
@@ -93,7 +97,8 @@ class GazeDwell(var dwellMs: Long = 1200, private val cooldownMs: Long = 1500, p
             accumulated += dt
         } else {
             awayMs += dt
-            if (zone != null && awayMs > graceMs) accumulated -= dt
+            val tolerance = if (target == null) gapPauseMs else graceMs
+            if (zone != null && awayMs > tolerance) accumulated -= dt
             if (zone == null || accumulated <= 0) { zone = target; accumulated = 0.0; awayMs = 0 }
         }
         if (zone == null) return 0f to null

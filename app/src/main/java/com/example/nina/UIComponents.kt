@@ -311,9 +311,9 @@ fun PagedGrid(
     modifier: Modifier = Modifier,
     onSpeak: (String) -> Unit = {}, // Lecture vocale des boutons de page
     gazeKey: String = "pages", // Préfixe des zones regardables des boutons de page
+    gap: Dp = 16.dp, // Espace entre les cases (plus grand pour la commande oculaire)
     cellContent: @Composable (cell: AACCell, modifier: Modifier) -> Unit
 ) {
-    val gap = 16.dp
     val pagerHeight = 72.dp
     BoxWithConstraints(modifier = modifier) {
         val layout = computeGridLayout(cells.size, columns, maxWidth.value, maxHeight.value, gap.value, pagerHeight.value)

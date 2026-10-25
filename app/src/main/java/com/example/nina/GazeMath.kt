@@ -22,6 +22,7 @@ data class FacePoint(val x: Float, val y: Float)
  * lidRatio : hauteur de l'iris entre les paupières (0 = contre la paupière du haut, 1 = contre celle du bas).
  * meanOpenness : ouverture moyenne des yeux ; la paupière descend quand on regarde vers le bas.
  * Ces deux dernières donnent le regard vertical, que la position des iris seule mesure mal.
+ * yaw / pitch : rotation de la tête en 3D (radians, pose calculée par MediaPipe), gauche-droite et haut-bas.
  */
 data class GazeFeatures(
     val gazeX: Double, val gazeY: Double,
@@ -29,7 +30,8 @@ data class GazeFeatures(
     val faceX: Double, val faceY: Double, val faceSize: Double,
     val eyeOpenness: Double,
     val lidRatio: Double = 0.5,
-    val meanOpenness: Double = eyeOpenness
+    val meanOpenness: Double = eyeOpenness,
+    val yaw: Double = 0.0, val pitch: Double = 0.0
 ) {
     /** Variables utilisées par la régression (le terme constant est ajouté à part), dans l'ordre de SCALE_FLOOR et PENALTY. */
     fun regressors(): DoubleArray = doubleArrayOf(
@@ -118,8 +120,13 @@ data class GazeSample(val features: DoubleArray, val targetX: Double, val target
  */
 class GazeModel private constructor(
     private val mean: DoubleArray, private val scale: DoubleArray,
-    private val coefX: DoubleArray, private val coefY: DoubleArray
+    private val coefX: DoubleArray, private val coefY: DoubleArray,
+    /** Compensation de la rotation de la tête mesurée à la calibration (null : pas de compensation). */
+    val compensation: HeadCompensation? = null
 ) {
+    /** Variables de régression d'une image, rotation de la tête compensée. */
+    fun regressorsOf(f: GazeFeatures): DoubleArray = (compensation?.apply(f) ?: f).regressors()
+
     /**
      * Correction locale : pour chaque point de calibration, l'écart qui reste après la régression globale
      * (position estimée -> vraie position). Près d'un point appris, on applique son écart ; loin de tous, rien.
@@ -155,7 +162,7 @@ class GazeModel private constructor(
         /** Poids « pas de correction » : loin de tout point appris, la correction s'efface. */
         const val LOCAL_PRIOR = 0.15
 
-        fun fit(samples: List<GazeSample>, lambda: Double = DEFAULT_LAMBDA): GazeModel? {
+        fun fit(samples: List<GazeSample>, lambda: Double = DEFAULT_LAMBDA, compensation: HeadCompensation? = null): GazeModel? {
             if (samples.size < 4) return null
             val n = samples.first().features.size
             val mean = DoubleArray(n) { j -> samples.map { it.features[j] }.average() }
@@ -169,7 +176,7 @@ class GazeModel private constructor(
             val rows = samples.map { standardize(it.features, mean, scale) }
             val cx = ridge(rows, samples.map { it.targetX }, lambda, penalty) ?: return null
             val cy = ridge(rows, samples.map { it.targetY }, lambda, penalty) ?: return null
-            val model = GazeModel(mean, scale, cx, cy)
+            val model = GazeModel(mean, scale, cx, cy, compensation)
             // Écarts restants à chaque point (moyennés si plusieurs mesures du même picto)
             model.anchors = samples.map { s ->
                 val (px, py) = model.predictGlobal(s.features)
@@ -431,4 +438,77 @@ fun rotatedToSource(x: Int, y: Int, w: Int, h: Int, rotation: Int): Pair<Int, In
     180 -> (w - 1 - x) to (h - 1 - y)
     270 -> (w - 1 - y) to x
     else -> x to y
+}
+
+/**
+ * Compensation de la rotation de la tête. Quand la tête tourne, les yeux tournent en sens inverse pour garder
+ * la même cible : les caractéristiques des yeux changent alors que le point regardé ne bouge pas, d'où la dérive.
+ * Pendant l'étape « garde les yeux sur l'étoile et tourne doucement la tête », on mesure de combien chaque
+ * caractéristique varie par radian de rotation (pentes), puis on retire cet effet de chaque image :
+ * les caractéristiques deviennent celles qu'on aurait mesurées avec la tête dans la position de référence.
+ *
+ * Ordre des pentes : gazeX, gazeY, lidRatio, meanOpenness, headX, headY, faceX, faceY.
+ */
+data class HeadCompensation(
+    val yaw0: Double, val pitch0: Double,
+    val yawSlopes: DoubleArray, val pitchSlopes: DoubleArray
+) {
+    fun apply(f: GazeFeatures): GazeFeatures {
+        if (yawSlopes.size < FIELDS || pitchSlopes.size < FIELDS) return f
+        val dy = f.yaw - yaw0; val dp = f.pitch - pitch0
+        fun c(i: Int, v: Double) = v - yawSlopes[i] * dy - pitchSlopes[i] * dp
+        return f.copy(
+            gazeX = c(0, f.gazeX), gazeY = c(1, f.gazeY), lidRatio = c(2, f.lidRatio), meanOpenness = c(3, f.meanOpenness),
+            headX = c(4, f.headX), headY = c(5, f.headY), faceX = c(6, f.faceX), faceY = c(7, f.faceY)
+        )
+    }
+
+    companion object {
+        private const val FIELDS = 8
+        /** Rotation minimale (écart-type, radians ≈ 2°) pour mesurer une pente fiable sur un axe. */
+        const val MIN_MOTION = 0.035
+
+        private fun values(f: GazeFeatures) =
+            doubleArrayOf(f.gazeX, f.gazeY, f.lidRatio, f.meanOpenness, f.headX, f.headY, f.faceX, f.faceY)
+
+        /**
+         * @param frames images prises pendant que la personne fixe une même cible en tournant la tête
+         * @return null si la tête n'a pas assez bougé (aucune compensation possible)
+         */
+        fun fit(frames: List<GazeFeatures>): HeadCompensation? {
+            val ok = frames.filter { it.eyeOpenness > GazeFeatures.CLOSED_EYE }
+            if (ok.size < 30) return null
+            val n = ok.size.toDouble()
+            val my = ok.sumOf { it.yaw } / n; val mp = ok.sumOf { it.pitch } / n
+            val y = ok.map { it.yaw - my }; val p = ok.map { it.pitch - mp }
+            val syy = y.sumOf { it * it }; val spp = p.sumOf { it * it }; val syp = y.indices.sumOf { y[it] * p[it] }
+            val yawOk = sqrt(syy / n) >= MIN_MOTION; val pitchOk = sqrt(spp / n) >= MIN_MOTION
+            if (!yawOk && !pitchOk) return null
+            val vals = ok.map { values(it) }
+            val yawSlopes = DoubleArray(FIELDS); val pitchSlopes = DoubleArray(FIELDS)
+            for (i in 0 until FIELDS) {
+                val mv = vals.sumOf { it[i] } / n
+                val v = vals.map { it[i] - mv }
+                val svy = v.indices.sumOf { v[it] * y[it] }; val svp = v.indices.sumOf { v[it] * p[it] }
+                val det = syy * spp - syp * syp
+                when {
+                    yawOk && pitchOk && det > 1e-12 -> {
+                        yawSlopes[i] = (svy * spp - svp * syp) / det
+                        pitchSlopes[i] = (svp * syy - svy * syp) / det
+                    }
+                    yawOk -> yawSlopes[i] = svy / syy
+                    else -> pitchSlopes[i] = svp / spp
+                }
+            }
+            return HeadCompensation(my, mp, yawSlopes, pitchSlopes)
+        }
+
+        /** Rotation gauche-droite et haut-bas (radians) d'après la matrice de pose 4 × 4 de MediaPipe (colonne par colonne). */
+        fun anglesFromMatrix(m: FloatArray): Pair<Double, Double>? {
+            if (m.size < 16) return null
+            // Direction vers laquelle pointe le visage = 3e colonne de la rotation
+            val fx = m[8].toDouble(); val fy = m[9].toDouble(); val fz = m[10].toDouble()
+            return kotlin.math.atan2(fx, fz) to kotlin.math.atan2(-fy, hypot(fx, fz))
+        }
+    }
 }

@@ -86,6 +86,16 @@ class GazeSelectionTest {
     }
 
     @Test
+    fun dwell_pausesInTheGapBetweenCells() {
+        val d = GazeDwell(dwellMs = 1000, cooldownMs = 1500, graceMs = 300, gapPauseMs = 1000)
+        var t = 0L
+        repeat(11) { t += 50; d.update(3, t) } // 500 ms sur la case 3
+        repeat(14) { t += 50; d.update(null, t) } // 700 ms dans l'espace vide : pause, rien de perdu
+        t += 50
+        assertEquals(0.55f, d.update(3, t).first, 0.06f)
+    }
+
+    @Test
     fun magnet_keepsTheChosenCellWhileThePointStaysNearby() {
         val m = GazeMagnet(switchMs = 250)
         var t = 0L

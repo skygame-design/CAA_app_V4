@@ -101,6 +101,7 @@ class GazeTracker(private val context: Context) {
             .setMinFaceDetectionConfidence(0.5f)
             .setMinFacePresenceConfidence(0.5f)
             .setMinTrackingConfidence(0.5f)
+            .setOutputFacialTransformationMatrixes(true) // Pose 3D de la tête
             .setResultListener { result: FaceLandmarkerResult, image -> onResult(result, image.width, image.height, result.timestampMs()) }
             .setErrorListener { e -> Log.e("Nina-Regard", "Erreur MediaPipe", e) }
             .build()
@@ -165,7 +166,9 @@ class GazeTracker(private val context: Context) {
         val features = face?.let { pts ->
             var points = pts.map { FacePoint(it.x(), it.y()) }
             if (fineIris && full != null) points = refineIrises(points, full)
+            val pose = result.facialTransformationMatrixes().orElse(null)?.firstOrNull()?.let { HeadCompensation.anglesFromMatrix(it) }
             GazeFeatures.from(points, aspect = width.toFloat() / height.coerceAtLeast(1))
+                ?.let { f -> if (pose == null) f else f.copy(yaw = pose.first, pitch = pose.second) }
         }
         _frames.value = GazeFrame(SystemClock.uptimeMillis(), face != null, features, lastBrightness)
         // Mesures de réglage toutes les 30 images analysées (compteur propre à ce fil de résultats)
@@ -175,8 +178,9 @@ class GazeTracker(private val context: Context) {
             lastFpsTime = now
         }
         if (resultCount % 30 == 0) features?.let {
-            Log.d("Nina-Regard", "image ${width}x$height, taille visage=%.3f, ouverture yeux=%.2f, regard=(%.3f ; %.3f), lumière=%.2f, iris affinés %d/%d"
-                .format(it.faceSize, it.eyeOpenness, it.gazeX, it.gazeY, lastBrightness, refinedCount, refineTried))
+            Log.d("Nina-Regard", "image ${width}x$height, taille visage=%.3f, ouverture yeux=%.2f, regard=(%.3f ; %.3f), lumière=%.2f, iris affinés %d/%d, tête %.1f° / %.1f°"
+                .format(it.faceSize, it.eyeOpenness, it.gazeX, it.gazeY, lastBrightness, refinedCount, refineTried,
+                    Math.toDegrees(it.yaw), Math.toDegrees(it.pitch)))
             refinedCount = 0; refineTried = 0
         }
     }
@@ -248,9 +252,10 @@ data class GazeProfile(
     val checkCm: Double? = null, // Erreur mesurée par la vérification juste après la calibration (plus réaliste)
     val version: Int = 0, // GazeFeatures.FEATURE_VERSION au moment de la calibration
     val refFaceSize: Double? = null, // Taille du visage pendant la calibration (distance de référence)
-    val offsetX: Double = 0.0, val offsetY: Double = 0.0 // Décalage mesuré par le dernier recentrage
+    val offsetX: Double = 0.0, val offsetY: Double = 0.0, // Décalage mesuré par le dernier recentrage
+    val headCompensation: HeadCompensation? = null // Effet de la rotation de la tête, mesuré à la calibration
 ) {
-    fun model() = GazeModel.fit(samples)
+    fun model() = GazeModel.fit(samples, compensation = headCompensation)
     fun correction() = GazeCorrection(refFaceSize, offsetX, offsetY)
 }
 
@@ -301,6 +306,21 @@ object GazeStore {
     fun dwellMs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_DWELL, 1200L)
     fun setDwellMs(context: Context, ms: Long) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(KEY_DWELL, ms).apply()
+
+    private const val KEY_GRID = "gaze_grid"
+    private const val KEY_GRID_COLUMNS = "gaze_grid_columns"
+    private const val KEY_TWO_STEP = "gaze_two_step"
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** Grille adaptée au regard : moins de pictos par rangée et de grands espaces entre les cases. */
+    fun gazeGrid(context: Context) = prefs(context).getBoolean(KEY_GRID, true)
+    fun setGazeGrid(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean(KEY_GRID, enabled).apply()
+    fun gazeGridColumns(context: Context) = prefs(context).getInt(KEY_GRID_COLUMNS, 4)
+    fun setGazeGridColumns(context: Context, columns: Int) = prefs(context).edit().putInt(KEY_GRID_COLUMNS, columns).apply()
+
+    /** Sélection en deux temps : fixer une zone l'agrandit, puis fixer le picto agrandi l'active. */
+    fun twoStep(context: Context) = prefs(context).getBoolean(KEY_TWO_STEP, false)
+    fun setTwoStep(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean(KEY_TWO_STEP, enabled).apply()
 
     fun cursorEnabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CURSOR, false)
     fun setCursorEnabled(context: Context, enabled: Boolean) =

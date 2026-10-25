@@ -1822,7 +1822,7 @@ private val helpTopics = listOf(
                     "Posez la tablette sur un support stable, face à l'enfant, à 40–60 cm, visage bien éclairé de face.",
                     "Réglez la taille de grille que l'enfant utilisera (3 ou 4 pictos par rangée conseillés).",
                     "Mode adulte › ⋮ › Commande oculaire. Autorisez la caméra la première fois.",
-                    "« Calibrer sur les pictos » : l'enfant suit des yeux l'étoile, qui se pose sur chaque picto. Gardez la tête la plus immobile possible.",
+                    "« Calibrer sur les pictos » : d'abord, les yeux restent sur l'étoile au centre pendant que la tête tourne doucement à gauche, à droite, en haut, en bas (quelques secondes). Puis l'enfant suit des yeux l'étoile, qui se pose sur chaque picto.",
                     "« Essai sur les pictos » : vérifiez qu'en fixant une case, l'anneau se remplit sur la bonne.",
                     "Activez « Sélection par le regard », puis refermez le cadenas."
                 )
@@ -1832,7 +1832,16 @@ private val helpTopics = listOf(
                     "Calibration sur les pictos" to "les mesures sont prises à l'emplacement exact de chaque picto, et l'erreur restante y est corrigée",
                     "Aimant" to "le regard est rattaché à la case la plus proche, et n'en change qu'après une hésitation franche",
                     "Fixation" to "l'anneau orange se remplit (1,2 s par défaut, réglable) : un coup d'œil ou un clignement ne déclenche rien",
-                    "Repos" to "après une sélection, la même case ne se redéclenche qu'après un court repos"
+                    "Repos" to "après une sélection, la même case ne se redéclenche qu'après un court repos",
+                    "Rotation de la tête" to "mesurée au début de la calibration, puis compensée : tourner un peu la tête ne fait plus dériver le pointeur",
+                    "Correction automatique" to "chaque picto touché, ou choisi du regard sans être effacé aussitôt, corrige un peu le décalage restant",
+                    "Anneau tolérant" to "un tremblement ou un passage entre deux cases met l'anneau en pause au lieu de le vider"
+                )
+            ),
+            HelpRows(
+                "Si le pointeur manque de précision", listOf(
+                    "Grille adaptée au regard" to "moins de pictos par rangée (4 conseillés) et de grands espaces entre les cases, quand la sélection par le regard est active",
+                    "Sélection en deux temps" to "fixer une zone l'agrandit deux fois (anneau bleu), puis fixer le picto agrandi l'active (anneau orange). Sans choix pendant 4 s, l'écran revient à la normale"
                 )
             ),
             HelpRows(
