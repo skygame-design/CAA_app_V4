@@ -79,6 +79,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             coil.ImageLoader.Builder(this).components { add(coil.decode.SvgDecoder.Factory()) }.build()
         )
 
+        // L'écran ne se met pas en veille (ni ne se verrouille) tant que l'app est au premier plan :
+        // l'enfant doit pouvoir parler à tout moment, sans déverrouiller la tablette
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         // Plein écran : l'app occupe tout l'écran, sans barre d'état ni barre de navigation
         WindowCompat.setDecorFitsSystemWindows(window, false)
         hideSystemBars(window)
@@ -214,6 +218,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     var gazeCursorEnabled by remember { mutableStateOf(GazeStore.cursorEnabled(context)) } // Point brut du regard (pour l'adulte)
                     var gazeSelectionEnabled by remember { mutableStateOf(GazeStore.selectionEnabled(context)) } // Sélection par fixation
                     var gazeDwellMs by remember { mutableLongStateOf(GazeStore.dwellMs(context)) }
+                    var gazeEnabled by remember { mutableStateOf(GazeStore.gazeEnabled(context)) } // Interrupteur général
+                    val mediaMuted by rememberMediaMuted() // Volume multimédia à zéro : Nina ne serait pas entendue
                     var gazeProfileVersion by remember { mutableIntStateOf(0) } // Change à chaque nouvelle calibration
                     val gazeProfile = remember(gazeProfileVersion) { GazeStore.activeProfile(context) }
                     val gazeModel = remember(gazeProfile) { gazeProfile?.model() }
@@ -222,8 +228,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     }
                     val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> hasCameraPermission = granted }
                     // La caméra ne tourne que si la fenêtre de commande oculaire est ouverte, ou si le regard est utilisé sur l'écran principal
-                    val gazeActive = (gazeCursorEnabled || gazeSelectionEnabled) && gazeModel != null && !showEyeGaze
-                    val needCamera = hasCameraPermission && (showEyeGaze || gazeActive)
+                    val gazeActive = gazeEnabled && (gazeCursorEnabled || gazeSelectionEnabled) && gazeModel != null && !showEyeGaze
+                    val needCamera = hasCameraPermission && gazeEnabled && (showEyeGaze || gazeActive)
                     // Grille adaptée au regard et sélection en deux temps (réglages de la fenêtre Commande oculaire)
                     val gazeGrid = remember(gazeProfileVersion) { GazeStore.gazeGrid(context) }
                     val gazeGridColumns = remember(gazeProfileVersion) { GazeStore.gazeGridColumns(context) }
@@ -368,6 +374,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         dndState.currentDropMode = DropTargetMode.NONE
                     }
 
+                    // Le gestionnaire de dépôt change à chaque recomposition (il travaille sur la liste affichée, accueil ou dossier) :
+                    // le pointerInput ci-dessous, créé une seule fois, doit toujours appeler la version à jour
+                    val currentOnDropRequest by rememberUpdatedState(onDropRequest)
+
                     // Modificateur PERMANENT sur le Root
                     val rootModifier = Modifier.pointerInput(Unit) {
                         awaitPointerEventScope {
@@ -381,7 +391,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
                                     if (change == null || !change.pressed) {
                                         Log.d("Nina-Debug", "🏠 Root : Relâché détecté, exécution du Drop")
-                                        dndState.draggedCell?.let { onDropRequest(dndState.dragOffset, it) }
+                                        dndState.draggedCell?.let { currentOnDropRequest(dndState.dragOffset, it) }
                                         dndState.isDragging = false
                                         dndState.draggedCell = null
                                     } else {
@@ -541,6 +551,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                         onBackspace = { if (phrase.isNotEmpty()) phrase.removeAt(phrase.lastIndex) },
                                         onClear = { phrase.clear() },
                                         haptic = haptic,
+                                        isMuted = mediaMuted,
+                                        onMutedClick = { showVolumePanel(context) },
                                         modifier = Modifier.weight(1f).padding(horizontal = 16.dp)
                                     )
 
@@ -884,6 +896,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             dwellMs = gazeDwellMs,
                             onDwellMsChange = { gazeDwellMs = it; GazeStore.setDwellMs(context, it) },
                             onProfileChanged = { gazeProfileVersion++ },
+                            gazeEnabled = gazeEnabled,
+                            onGazeEnabledChange = { gazeEnabled = it; GazeStore.setGazeEnabled(context, it) },
                             onDismiss = { showEyeGaze = false }
                         )
                     }

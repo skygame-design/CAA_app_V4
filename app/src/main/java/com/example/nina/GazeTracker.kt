@@ -307,6 +307,11 @@ object GazeStore {
     fun setDwellMs(context: Context, ms: Long) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(KEY_DWELL, ms).apply()
 
+    /** Interrupteur général : désactivée, la caméra reste éteinte, réglages et calibration sont gardés. */
+    private const val KEY_ENABLED = "gaze_enabled"
+    fun gazeEnabled(context: Context) = prefs(context).getBoolean(KEY_ENABLED, true)
+    fun setGazeEnabled(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
+
     private const val KEY_GRID = "gaze_grid"
     private const val KEY_GRID_COLUMNS = "gaze_grid_columns"
     private const val KEY_TWO_STEP = "gaze_two_step"

@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
@@ -67,7 +68,9 @@ fun SentenceBar(
     onBackspace: () -> Unit,
     onClear: () -> Unit,
     haptic: HapticFeedback,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isMuted: Boolean = false, // Volume multimédia à zéro : alerte visible pour l'adulte
+    onMutedClick: () -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     // Le dernier mot ajouté reste visible quand la phrase est longue
@@ -99,6 +102,22 @@ fun SentenceBar(
                 )
                 else LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     itemsIndexed(sentence) { _, cell -> SentenceItem(cell) }
+                }
+            }
+            if (isMuted) {
+                // Son coupé : Nina ne serait pas entendue. Toucher l'alerte ouvre le réglage du volume.
+                Row(
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(Color(0xFFC62828))
+                        .clickable { onMutedClick() }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.VolumeOff, contentDescription = null, tint = Color.White, modifier = Modifier.size(32.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Son coupé", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
             }
             if (sentence.isNotEmpty()) {

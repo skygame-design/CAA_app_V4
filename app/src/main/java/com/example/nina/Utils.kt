@@ -206,3 +206,30 @@ class AudioRecorder(private val context: Context) {
 }
 
 
+
+/** Volume multimédia (celui de la voix et des sons enregistrés) à zéro ou coupé. */
+fun isMediaMuted(context: Context): Boolean {
+    val audio = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+    val stream = android.media.AudioManager.STREAM_MUSIC
+    return audio.getStreamVolume(stream) == 0 || audio.isStreamMute(stream)
+}
+
+/** Suit en direct le volume multimédia (vérifié toutes les secondes, sans permission particulière). */
+@androidx.compose.runtime.Composable
+fun rememberMediaMuted(): androidx.compose.runtime.State<Boolean> {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val muted = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(isMediaMuted(context)) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        while (true) {
+            muted.value = isMediaMuted(context)
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    return muted
+}
+
+/** Affiche le réglage du volume multimédia d'Android (sans le modifier). */
+fun showVolumePanel(context: Context) {
+    val audio = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+    audio.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_SAME, android.media.AudioManager.FLAG_SHOW_UI)
+}

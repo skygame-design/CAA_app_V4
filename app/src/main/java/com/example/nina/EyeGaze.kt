@@ -74,6 +74,8 @@ fun EyeGazeDialog(
     dwellMs: Long,
     onDwellMsChange: (Long) -> Unit,
     onProfileChanged: () -> Unit,
+    gazeEnabled: Boolean,
+    onGazeEnabledChange: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -128,6 +130,7 @@ fun EyeGazeDialog(
                         else screen = GazeScreen.HEAD_MOTION
                     },
                     onSettingsChanged = onProfileChanged,
+                    gazeEnabled = gazeEnabled, onGazeEnabledChange = onGazeEnabledChange,
                     onVerify = { screen = GazeScreen.VERIFICATION },
                     onTrial = { screen = GazeScreen.TRIAL },
                     onRecenter = { screen = GazeScreen.RECENTER },
@@ -236,6 +239,7 @@ private fun GazeHome(
     cursorEnabled: Boolean, onCursorEnabledChange: (Boolean) -> Unit,
     selectionEnabled: Boolean, onSelectionEnabledChange: (Boolean) -> Unit,
     dwellMs: Long, onDwellMsChange: (Long) -> Unit, onFineIrisChange: (Boolean) -> Unit, onSettingsChanged: () -> Unit,
+    gazeEnabled: Boolean, onGazeEnabledChange: (Boolean) -> Unit,
     onCalibrate: (CalibrationMode) -> Unit, onVerify: () -> Unit, onTrial: () -> Unit, onRecenter: () -> Unit, onDismiss: () -> Unit
 ) {
     val frame by tracker.frames.collectAsState()
@@ -255,6 +259,19 @@ private fun GazeHome(
             "Pour de bons résultats : tablette posée sur un support, visage bien éclairé de face, à 40–60 cm de l'écran.",
             fontSize = 15.sp, color = Color.DarkGray
         )
+
+        // Interrupteur général : tout couper d'un geste, sans toucher aux réglages ni à la calibration
+        Card(colors = CardDefaults.cardColors(containerColor = if (gazeEnabled) Color(0xFFE8F5E9) else Color(0xFFECEFF1))) {
+            Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                SettingSwitch(
+                    if (gazeEnabled) "Commande oculaire activée" else "Commande oculaire désactivée",
+                    if (gazeEnabled) "Désactivez-la ici pour éteindre la caméra : les pictos ne réagissent plus au regard. Réglages et calibration sont conservés."
+                    else "La caméra est éteinte et les pictos ne réagissent plus au regard. Réactivez-la pour retrouver vos réglages et votre calibration.",
+                    gazeEnabled, true, onGazeEnabledChange
+                )
+            }
+        }
+        if (!gazeEnabled) return@Column
 
         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             // État de la caméra, en direct

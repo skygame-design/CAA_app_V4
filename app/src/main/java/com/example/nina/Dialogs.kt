@@ -1852,6 +1852,7 @@ private val helpTopics = listOf(
                     "Vérifier la précision" to "mesure l'écart sur 5 pictos, en cm"
                 )
             ),
+            HelpTip("Interrupteur général en haut de la fenêtre Commande oculaire : désactivée, la caméra est éteinte et rien ne réagit au regard ; réglages et calibration sont gardés pour la prochaine fois."),
             HelpTip("La sélection par le regard est coupée en mode adulte et quand une fenêtre est ouverte. Les phrases rapides, Accueil, Play, ⌫, ← et les boutons de page se choisissent aussi du regard.")
         )
     ),
@@ -1860,6 +1861,8 @@ private val helpTopics = listOf(
         blocks = listOf(
             HelpRows(
                 "Dans Paramètres", listOf(
+                    "Son coupé" to "si le volume multimédia de la tablette est à zéro, une alerte rouge « Son coupé » apparaît dans la barre de phrase ; la toucher ouvre le réglage du volume",
+                    "Veille" to "tant que Nina est ouverte, l'écran ne se met pas en veille et ne se verrouille pas",
                     "Contraste élevé (CVI)" to "fond noir et bordures jaunes, pour la déficience visuelle",
                     "Couleur de fond" to "couleurs proposées ou personnalisées",
                     "Voix" to "hauteur (voix d'enfant) et vitesse",
