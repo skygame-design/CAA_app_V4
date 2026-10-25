@@ -34,7 +34,7 @@ data class NormRect(val left: Double, val top: Double, val right: Double, val bo
  *   les petits sauts du regard ne font pas « clignoter » la sélection ;
  * - le curseur affiché se place au centre de la zone (stable, rassurant pour l'enfant).
  */
-class GazeMagnet(private val switchMs: Long = 250, private val margin: Double = 0.6) {
+class GazeMagnet(private val switchMs: Long = 250, private val margin: Double = 0.6, private val keepMargin: Double = 1.2) {
     var current: Int? = null
         private set
     private var candidate: Int? = null
@@ -46,7 +46,12 @@ class GazeMagnet(private val switchMs: Long = 250, private val margin: Double = 
             ?.takeIf { zones[it].relativeDistance(x, y) <= margin }
 
     fun update(zones: List<NormRect>, x: Double, y: Double, timeMs: Long): Int? {
-        val near = nearest(zones, x, y)
+        var near = nearest(zones, x, y)
+        // Hystérésis : la case choisie est gardée tant que le point reste à peu près dessus (marge plus large),
+        // sauf s'il entre franchement dans une autre case
+        val cur = current
+        if (cur != null && cur < zones.size && near != cur && zones[cur].relativeDistance(x, y) <= keepMargin &&
+            (near == null || !zones[near].contains(x, y))) near = cur
         when {
             near == current -> candidate = null
             near != candidate -> { candidate = near; candidateSince = timeMs }
@@ -62,33 +67,45 @@ class GazeMagnet(private val switchMs: Long = 250, private val margin: Double = 
 
 /**
  * Fixation : progression de 0 à 1 tant que la même zone reste visée ; à 1, la zone est activée une fois.
- * Après une activation, il faut quitter la zone (ou attendre cooldownMs) avant de pouvoir la réactiver :
+ * Tolérante : un écart bref (moins de graceMs) ne fait rien perdre ; au-delà, la progression redescend
+ * à la même vitesse qu'elle monte, et une autre case ne prend le relais qu'une fois l'anneau vidé.
+ * Après une activation, il faut attendre cooldownMs avant que la même zone puisse se remplir à nouveau :
  * l'enfant ne « répète » pas un mot sans le vouloir.
  */
-class GazeDwell(var dwellMs: Long = 1200, private val cooldownMs: Long = 1500) {
-    private var zone: Int? = null
-    private var since = 0L
+class GazeDwell(var dwellMs: Long = 1200, private val cooldownMs: Long = 1500, private val graceMs: Long = 300) {
+    /** Zone dont l'anneau se remplit (peut différer un instant de la zone visée). */
+    var zone: Int? = null
+        private set
+    private var accumulated = 0.0
+    private var lastTime = -1L
+    private var awayMs = 0L
     private var firedZone: Int? = null
     private var firedAt = 0L
 
-    /** @return la progression (0..1) et, si l'activation vient d'avoir lieu, la zone activée. */
+    /** @return la progression (0..1) de `zone` et, si l'activation vient d'avoir lieu, la zone activée. */
     fun update(target: Int?, timeMs: Long): Pair<Float, Int?> {
-        if (target != zone) { zone = target; since = timeMs }
-        if (target == null) return 0f to null
-        // Même zone que la dernière activation : on attend la fin du délai de repos
-        if (target == firedZone && timeMs - firedAt < cooldownMs + dwellMs) {
-            if (timeMs - firedAt < cooldownMs) return 0f to null
-            since = maxOf(since, firedAt + cooldownMs)
+        val dt = if (lastTime < 0) 0L else (timeMs - lastTime).coerceIn(0, 200)
+        lastTime = timeMs
+        if (target != null && target == zone) {
+            awayMs = 0
+            // Même zone que la dernière activation : on attend la fin du délai de repos
+            if (target == firedZone && timeMs - firedAt < cooldownMs) return 0f to null
+            accumulated += dt
+        } else {
+            awayMs += dt
+            if (zone != null && awayMs > graceMs) accumulated -= dt
+            if (zone == null || accumulated <= 0) { zone = target; accumulated = 0.0; awayMs = 0 }
         }
-        val progress = ((timeMs - since).toFloat() / dwellMs).coerceIn(0f, 1f)
+        if (zone == null) return 0f to null
+        val progress = (accumulated / dwellMs).coerceIn(0.0, 1.0).toFloat()
         if (progress >= 1f) {
-            firedZone = target; firedAt = timeMs; since = timeMs
-            return 1f to target
+            firedZone = zone; firedAt = timeMs; accumulated = 0.0
+            return 1f to zone
         }
         return progress to null
     }
 
-    fun reset() { zone = null; firedZone = null }
+    fun reset() { zone = null; firedZone = null; accumulated = 0.0; awayMs = 0; lastTime = -1 }
 }
 
 object GazeCalibrationPlan {

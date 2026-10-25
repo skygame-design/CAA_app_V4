@@ -838,7 +838,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             tracker = gazeTracker, model = gazeModel, correction = gazeProfile?.correction() ?: GazeCorrection(), registry = gazeRegistry,
                             selectionEnabled = gazeSelectionEnabled && !isAdminMode && !anyDialogOpen,
                             dwellMs = gazeDwellMs,
-                            showRawPoint = gazeCursorEnabled
+                            showRawPoint = gazeCursorEnabled,
+                            learningEnabled = !isAdminMode && !anyDialogOpen,
+                            onDriftLearned = { dx, dy ->
+                                // Décalage appris pendant l'utilisation : enregistré dans le profil (sans relancer le suivi)
+                                gazeProfile?.let { GazeStore.saveProfile(context, it.copy(offsetX = it.offsetX + dx, offsetY = it.offsetY + dy)) }
+                            }
                         )
                     }
 

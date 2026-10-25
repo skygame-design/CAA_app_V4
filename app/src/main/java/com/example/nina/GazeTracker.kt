@@ -60,7 +60,13 @@ class GazeTracker(private val context: Context) {
     @Volatile var fineIris = GazeStore.fineIris(context)
 
     // Images en pleine définition gardées le temps que MediaPipe renvoie son résultat (retrouvées par leur horodatage)
-    private val fullFrames = java.util.concurrent.ConcurrentHashMap<Long, Bitmap>()
+    private val fullFrames = java.util.concurrent.ConcurrentHashMap<Long, FullFrame>()
+
+    /** Image caméra telle quelle (non tournée : la tourner en entier coûte cher) et sa rotation. */
+    private class FullFrame(val bitmap: Bitmap, val rotation: Int) {
+        val rotatedWidth get() = if (rotation % 180 == 0) bitmap.width else bitmap.height
+        val rotatedHeight get() = if (rotation % 180 == 0) bitmap.height else bitmap.width
+    }
     private var refinedCount = 0
     private var refineTried = 0
 
@@ -132,14 +138,16 @@ class GazeTracker(private val context: Context) {
             if (!running) return
             val raw = proxy.toBitmap()
             val rotation = proxy.imageInfo.rotationDegrees
-            val bitmap = if (rotation == 0) raw else
-                Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
-            if (frameCount++ % 15 == 0) lastBrightness = brightnessOf(bitmap)
+            // MediaPipe sur une image réduite et tournée, en une seule opération ; l'image pleine définition
+            // reste non tournée : seuls les deux petits carrés autour des yeux y seront lus
+            val scale = if (maxOf(raw.width, raw.height) > 1300) 0.5f else 1f
+            val small = if (rotation == 0 && scale == 1f) raw else Bitmap.createBitmap(
+                raw, 0, 0, raw.width, raw.height, Matrix().apply { postScale(scale, scale); postRotate(rotation.toFloat()) }, true
+            )
+            if (frameCount++ % 15 == 0) lastBrightness = brightnessOf(small)
             val time = SystemClock.uptimeMillis()
-            // MediaPipe sur une image réduite (plus rapide) ; l'image pleine définition est gardée pour l'iris
-            val small = if (bitmap.width > 1000) Bitmap.createScaledBitmap(bitmap, bitmap.width / 2, bitmap.height / 2, true) else bitmap
-            if (fineIris && small !== bitmap) {
-                fullFrames[time] = bitmap
+            if (fineIris && scale < 1f) {
+                fullFrames[time] = FullFrame(raw, rotation)
                 fullFrames.keys.filter { it < time - 1000 }.forEach { fullFrames.remove(it) }
             }
             landmarker?.detectAsync(BitmapImageBuilder(small).build(), time)
@@ -177,26 +185,34 @@ class GazeTracker(private val context: Context) {
      * Affine les deux centres d'iris (points 468 et 473) dans l'image pleine définition.
      * Rayon de l'iris : points 469–472 et 474–477 ; paupières : 159/145 et 386/374.
      */
-    private fun refineIrises(points: List<FacePoint>, full: Bitmap): List<FacePoint> {
+    private fun refineIrises(points: List<FacePoint>, full: FullFrame): List<FacePoint> {
         if (points.size < 478) return points
         val out = points.toMutableList()
+        // Calculs dans le repère de l'image tournée (celui de MediaPipe), pixels lus dans l'image d'origine
+        val fw = full.rotatedWidth; val fh = full.rotatedHeight
+        val src = full.bitmap
         listOf(Triple(468, 469..472, 159 to 145), Triple(473, 474..477, 386 to 374)).forEach { (center, ring, lids) ->
             refineTried++
-            val cx = points[center].x.toDouble() * full.width; val cy = points[center].y.toDouble() * full.height
-            val radius = ring.map { hypot(points[it].x * full.width - cx, points[it].y * full.height - cy) }.average()
+            val cx = points[center].x.toDouble() * fw; val cy = points[center].y.toDouble() * fh
+            val radius = ring.map { hypot(points[it].x.toDouble() * fw - cx, points[it].y.toDouble() * fh - cy) }.average()
             val half = (radius * 1.6).toInt().coerceAtLeast(4)
-            val left = (cx - half).toInt().coerceIn(0, full.width - 1); val top = (cy - half).toInt().coerceIn(0, full.height - 1)
-            val w = (2 * half).coerceAtMost(full.width - left); val h = (2 * half).coerceAtMost(full.height - top)
+            val left = (cx - half).toInt().coerceIn(0, fw - 1); val top = (cy - half).toInt().coerceIn(0, fh - 1)
+            val w = (2 * half).coerceAtMost(fw - left); val h = (2 * half).coerceAtMost(fh - top)
             if (w < 8 || h < 8) return@forEach
-            val argb = IntArray(w * h)
-            full.getPixels(argb, 0, w, left, top, w, h)
+            // Le carré correspondant dans l'image d'origine
+            val (ax, ay) = rotatedToSource(left, top, src.width, src.height, full.rotation)
+            val (bx, by) = rotatedToSource(left + w - 1, top + h - 1, src.width, src.height, full.rotation)
+            val sl = minOf(ax, bx); val st = minOf(ay, by); val sw = maxOf(ax, bx) - sl + 1; val sh = maxOf(ay, by) - st + 1
+            val argb = IntArray(sw * sh)
+            src.getPixels(argb, 0, sw, sl, st, sw, sh)
             val gray = IntArray(w * h) { i ->
-                val c = argb[i]
+                val (x, y) = rotatedToSource(left + i % w, top + i / w, src.width, src.height, full.rotation)
+                val c = argb[(y - st) * sw + (x - sl)]
                 (0.299 * ((c shr 16) and 0xFF) + 0.587 * ((c shr 8) and 0xFF) + 0.114 * (c and 0xFF)).toInt()
             }
-            val lidTop = points[lids.first].y.toDouble() * full.height - top; val lidBottom = points[lids.second].y.toDouble() * full.height - top
+            val lidTop = points[lids.first].y.toDouble() * fh - top; val lidBottom = points[lids.second].y.toDouble() * fh - top
             darkCentroid(gray, w, h, cx - left, cy - top, radius, minOf(lidTop, lidBottom), maxOf(lidTop, lidBottom))?.let { (rx, ry) ->
-                out[center] = FacePoint(((rx + left) / full.width).toFloat(), ((ry + top) / full.height).toFloat())
+                out[center] = FacePoint(((rx + left) / fw).toFloat(), ((ry + top) / fh).toFloat())
                 refinedCount++
             }
         }

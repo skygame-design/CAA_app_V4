@@ -398,3 +398,37 @@ object GazeTargets {
 
 /** Garde la valeur dans 0..1 (le curseur reste sur l'écran). */
 fun clamp01(v: Double) = v.coerceIn(0.0, 1.0)
+
+/**
+ * Correction automatique du décalage : à chaque picto activé (toucher du doigt, ou fixation non effacée),
+ * on sait où l'utilisateur regardait vraiment. Le décalage restant entre le point estimé et le centre
+ * du picto est appris peu à peu (20 % à chaque fois), ce qui rattrape la dérive due aux mouvements de tête.
+ */
+class DriftLearner(
+    var offsetX: Double = 0.0, var offsetY: Double = 0.0,
+    private val rate: Double = 0.2,
+    private val maxResidual: Double = 0.15, // Au-delà : sans doute pas le picto regardé, on n'apprend rien
+    private val maxOffset: Double = 0.12
+) {
+    fun apply(x: Double, y: Double) = (x + offsetX) to (y + offsetY)
+
+    /** @param estX, estY point estimé, décalage appris déjà appliqué ; @return true si l'exemple a été retenu */
+    fun learn(estX: Double, estY: Double, targetX: Double, targetY: Double): Boolean {
+        val dx = targetX - estX; val dy = targetY - estY
+        if (hypot(dx, dy) > maxResidual) return false
+        offsetX = (offsetX + rate * dx).coerceIn(-maxOffset, maxOffset)
+        offsetY = (offsetY + rate * dy).coerceIn(-maxOffset, maxOffset)
+        return true
+    }
+}
+
+/**
+ * Pixel de l'image caméra d'origine (largeur w, hauteur h, non tournée) qui se retrouve en (x, y)
+ * dans l'image tournée de `rotation` degrés dans le sens horaire (convention CameraX).
+ */
+fun rotatedToSource(x: Int, y: Int, w: Int, h: Int, rotation: Int): Pair<Int, Int> = when ((rotation % 360 + 360) % 360) {
+    90 -> y to (h - 1 - x)
+    180 -> (w - 1 - x) to (h - 1 - y)
+    270 -> (w - 1 - y) to x
+    else -> x to y
+}

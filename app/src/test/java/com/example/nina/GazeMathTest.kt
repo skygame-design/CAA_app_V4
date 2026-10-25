@@ -145,6 +145,18 @@ class GazeMathTest {
     }
 
     @Test
+    fun rotatedToSource_matchesCameraRotation() {
+        // Image d'origine 4 × 2 : tournée de 90° (sens horaire), son coin haut-gauche part en haut à droite
+        assertEquals(0 to 0, rotatedToSource(1, 0, 4, 2, 90))
+        assertEquals(3 to 1, rotatedToSource(0, 3, 4, 2, 90))
+        // 270° : le coin haut-gauche part en bas à gauche
+        assertEquals(0 to 0, rotatedToSource(0, 3, 4, 2, 270))
+        assertEquals(3 to 1, rotatedToSource(1, 0, 4, 2, 270))
+        assertEquals(3 to 1, rotatedToSource(0, 0, 4, 2, 180))
+        assertEquals(2 to 1, rotatedToSource(2, 1, 4, 2, 0))
+    }
+
+    @Test
     fun notEnoughPoints_noModel() {
         val few = listOf(GazeSample(doubleArrayOf(0.0, 0.0), 0.5, 0.5), GazeSample(doubleArrayOf(1.0, 1.0), 0.6, 0.6))
         assertNull(GazeModel.fit(few))

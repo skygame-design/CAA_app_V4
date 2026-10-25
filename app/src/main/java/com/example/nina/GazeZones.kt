@@ -12,6 +12,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -30,6 +34,9 @@ class GazeZoneRegistry {
     val zones = mutableStateMapOf<String, GazeZone>()
     var rootWidth by mutableIntStateOf(1)
     var rootHeight by mutableIntStateOf(1)
+
+    /** Appelé quand une zone est touchée du doigt (la sélection par le regard en tire la correction du décalage). */
+    var onTouch: ((String) -> Unit)? = null
 
     /** Zones en coordonnées normalisées, triées par clé (ordre stable). */
     fun normalized(): List<Pair<String, NormRect>> =
@@ -58,10 +65,18 @@ fun Modifier.gazeZone(key: String, enabled: Boolean = true, onActivate: () -> Un
         onDispose { registry?.zones?.remove(key) }
     }
     if (registry == null || !enabled) Modifier
-    else Modifier.onGloballyPositioned { coords ->
-        val b = coords.boundsInRoot()
-        if (registry.zones[key]?.bounds != b) registry.zones[key] = GazeZone(b, stableAction)
-    }
+    else Modifier
+        .onGloballyPositioned { coords ->
+            val b = coords.boundsInRoot()
+            if (registry.zones[key]?.bounds != b) registry.zones[key] = GazeZone(b, stableAction)
+        }
+        // Observe les touchers sans les consommer : le picto reste cliquable normalement
+        .pointerInput(key) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                registry.onTouch?.invoke(key)
+            }
+        }
 }
 
 /**
@@ -76,16 +91,51 @@ fun GazeSelectionOverlay(
     registry: GazeZoneRegistry,
     selectionEnabled: Boolean,
     dwellMs: Long,
-    showRawPoint: Boolean
+    showRawPoint: Boolean,
+    learningEnabled: Boolean = selectionEnabled,
+    onDriftLearned: (Double, Double) -> Unit = { _, _ -> }
 ) {
-    val point by rememberGazePoint(tracker, model, correction)
+    val rawPoint = rememberGazePoint(tracker, model, correction)
+    // Décalage appris en cours d'utilisation, en plus de celui de la calibration (repart de zéro si le profil change)
+    val drift = remember(model, correction) { DriftLearner() }
+    var driftVersion by remember { mutableIntStateOf(0) }
+    val point by remember(drift) {
+        derivedStateOf {
+            driftVersion // Recalculé quand le décalage appris change
+            rawPoint.value?.let { (x, y) -> drift.apply(x, y).let { clamp01(it.first) to clamp01(it.second) } }
+        }
+    }
     val magnet = remember { GazeMagnet() }
     val dwell = remember { GazeDwell() }
     var currentKey by remember { mutableStateOf<String?>(null) }
     var progress by remember { mutableFloatStateOf(0f) }
     dwell.dwellMs = dwellMs
+    val learning by rememberUpdatedState(learningEnabled)
+    val latestPoint by rememberUpdatedState(point)
+    val onLearned by rememberUpdatedState(onDriftLearned)
 
-    LaunchedEffect(model, selectionEnabled) {
+    // Apprend du centre de la zone réellement visée ; le point estimé est celui du moment de l'activation
+    fun learnFrom(key: String, p: Pair<Double, Double>) {
+        val r = registry.normalized().firstOrNull { it.first == key }?.second ?: return
+        if (drift.learn(p.first, p.second, r.centerX, r.centerY)) {
+            driftVersion++
+            android.util.Log.i("Nina-Regard", "Correction auto (%s) : décalage appris (%.3f ; %.3f)".format(key, drift.offsetX, drift.offsetY))
+            onLearned(drift.offsetX, drift.offsetY)
+        }
+    }
+    // Activation par le regard : on attend 2 s pour vérifier qu'elle n'est pas aussitôt effacée (⌫)
+    var pending by remember { mutableStateOf<Triple<String, Pair<Double, Double>, Long>?>(null) }
+    fun isCorrection(key: String) = key == "effacer_mot"
+
+    DisposableEffect(registry, drift) {
+        registry.onTouch = { key ->
+            if (isCorrection(key)) pending = null
+            else latestPoint?.let { p -> if (learning) learnFrom(key, p) }
+        }
+        onDispose { registry.onTouch = null }
+    }
+
+    LaunchedEffect(model, selectionEnabled, drift) {
         var signature = ""
         snapshotFlow { point }.collect { p ->
             val zones = registry.normalized()
@@ -93,12 +143,18 @@ fun GazeSelectionOverlay(
             val sig = zones.joinToString(",") { it.first }
             if (sig != signature) { signature = sig; magnet.reset(); dwell.reset() }
             val now = android.os.SystemClock.uptimeMillis()
+            pending?.let { (key, at, time) -> if (now - time > 2000) { pending = null; if (learning) learnFrom(key, at) } }
             val index = if (p == null) null else magnet.update(zones.map { it.second }, p.first, p.second, now)
             currentKey = index?.let { zones.getOrNull(it)?.first }
             if (!selectionEnabled) { progress = 0f; return@collect }
             val (pr, fired) = dwell.update(index, now)
             progress = pr
-            if (fired != null) zones.getOrNull(fired)?.first?.let { key -> registry.zones[key]?.onActivate?.invoke() }
+            // L'anneau qui se remplit est montré sur sa propre case (elle peut rester un instant après un écart)
+            if (pr > 0f) dwell.zone?.let { z -> zones.getOrNull(z)?.first?.let { currentKey = it } }
+            if (fired != null) zones.getOrNull(fired)?.first?.let { key ->
+                if (isCorrection(key)) pending = null else if (p != null) pending = Triple(key, p, now)
+                registry.zones[key]?.onActivate?.invoke()
+            }
         }
     }
 

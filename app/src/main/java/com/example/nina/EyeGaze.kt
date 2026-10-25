@@ -582,6 +582,7 @@ private fun VerificationRun(
 
     LaunchedEffect(Unit) {
         val errors = mutableListOf<Double>()
+        val biases = mutableListOf<Pair<Double, Double>>() // Écart signé (cm) : montre un décalage constant
         val jitters = mutableListOf<Double>()
         targets.forEachIndexed { i, (tx, ty) ->
             index = i
@@ -591,12 +592,14 @@ private fun VerificationRun(
             if (seen.size >= 5) {
                 val mx = seen.map { it.first }.average(); val my = seen.map { it.second }.average()
                 errors += kotlin.math.hypot((mx - tx) * widthCm, (my - ty) * heightCm)
+                biases += (mx - tx) * widthCm to (my - ty) * heightCm
                 // Stabilité : distance moyenne du pointeur à sa position moyenne pendant la fixation
                 jitters += seen.map { kotlin.math.hypot((it.first - mx) * widthCm, (it.second - my) * heightCm) }.average()
             }
         }
         jitterCm = jitters.takeIf { it.isNotEmpty() }?.average()
-        android.util.Log.i("Nina-Regard", "Vérification : erreur %.2f cm, stabilité ± %.2f cm".format(errors.average(), jitterCm ?: -1.0))
+        android.util.Log.i("Nina-Regard", "Vérification : erreur %.2f cm, stabilité ± %.2f cm, décalage moyen (%.2f ; %.2f) cm".format(
+            errors.average(), jitterCm ?: -1.0, biases.map { it.first }.average(), biases.map { it.second }.average()))
         resultCm = errors.takeIf { it.isNotEmpty() }?.average()
         onResult?.invoke(resultCm)
     }

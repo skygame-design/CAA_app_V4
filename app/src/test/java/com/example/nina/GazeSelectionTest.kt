@@ -65,9 +65,51 @@ class GazeSelectionTest {
         assertEquals("une seule activation en 2 s", 1, fired)
         repeat(60) { t += 50; if (d.update(3, t).second == 3) fired++ } // 3 s de plus : nouvelle activation après le repos
         assertEquals(2, fired)
-        // Changer de case remet la progression à zéro
-        val (p, _) = d.update(4, t + 50)
-        assertTrue(p < 0.1f)
+    }
+
+    @Test
+    fun dwell_toleratesBriefExcursions_thenHandsOverAfterALongerOne() {
+        val d = GazeDwell(dwellMs = 1000, cooldownMs = 1500, graceMs = 300)
+        var t = 0L
+        repeat(11) { t += 50; d.update(3, t) } // 500 ms sur la case 3
+        // Écart de 200 ms vers la case 4 (tremblement, aimant) : rien n'est perdu
+        repeat(4) { t += 50; d.update(4, t) }
+        t += 50
+        val (p, _) = d.update(3, t)
+        assertEquals(0.55f, p, 0.06f)
+        assertEquals(3, d.zone)
+        // Regard durable sur la case 4 : l'anneau de la 3 se vide, puis la 4 prend le relais
+        var last: Pair<Float, Int?> = 0f to null
+        repeat(30) { t += 50; last = d.update(4, t) }
+        assertEquals(4, d.zone)
+        assertTrue("la case 4 se remplit : ${last.first}", last.first > 0.3f)
+    }
+
+    @Test
+    fun magnet_keepsTheChosenCellWhileThePointStaysNearby() {
+        val m = GazeMagnet(switchMs = 250)
+        var t = 0L
+        repeat(10) { t += 33; m.update(grid, grid[5].centerX, grid[5].centerY, t) }
+        assertEquals(5, m.current)
+        // Point dans l'espace entre la case 5 et la case 6, un peu plus près de la 6 : on reste sur la 5
+        val between = (grid[5].right * 0.4 + grid[6].left * 0.6)
+        repeat(20) { t += 33; m.update(grid, between, grid[5].centerY, t) }
+        assertEquals(5, m.current)
+    }
+
+    @Test
+    fun driftLearner_catchesUpWithAConstantOffset_andIgnoresOutliers() {
+        val l = DriftLearner()
+        // Le point estimé tombe toujours 0,08 à gauche et 0,05 en dessous du picto regardé
+        repeat(15) {
+            val (ex, ey) = l.apply(0.5 - 0.08, 0.4 + 0.05)
+            l.learn(ex, ey, 0.5, 0.4)
+        }
+        assertEquals(0.08, l.offsetX, 0.01)
+        assertEquals(-0.05, l.offsetY, 0.01)
+        // Activation très loin du point estimé : sûrement pas le picto regardé, rien n'est appris
+        assertTrue(!l.learn(0.1, 0.1, 0.9, 0.9))
+        assertEquals(0.08, l.offsetX, 0.01)
     }
 
     @Test
