@@ -134,6 +134,11 @@ class GazeTracker(private val context: Context) {
             GazeFeatures.from(pts.map { FacePoint(it.x(), it.y()) }, aspect = width.toFloat() / height.coerceAtLeast(1))
         }
         _frames.value = GazeFrame(SystemClock.uptimeMillis(), face != null, features, lastBrightness)
+        // Mesures de réglage (une fois par seconde environ), visibles avec « adb logcat -s Nina-Regard »
+        if (frameCount % 30 == 0) features?.let {
+            Log.d("Nina-Regard", "image ${width}x$height, taille visage=%.3f, ouverture yeux=%.2f, regard=(%.3f ; %.3f), lumière=%.2f"
+                .format(it.faceSize, it.eyeOpenness, it.gazeX, it.gazeY, lastBrightness))
+        }
     }
 
     /** Luminosité moyenne sur une grille de 16 × 16 points (rapide). */

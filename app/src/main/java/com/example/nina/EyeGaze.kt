@@ -150,10 +150,11 @@ private fun GazeHome(
                             if (f.faceDetected) StatusLine(f.eyesOpen, "Yeux bien visibles", "Yeux fermés ou cachés")
                             StatusLine(f.brightness > 0.25, "Lumière suffisante", "Trop sombre : éclairez le visage")
                             f.features?.let { feat ->
-                                // Taille du visage dans l'image : grande = trop près, petite = trop loin
+                                // Taille du visage dans l'image (écart entre les coins extérieurs des yeux) :
+                                // mesuré sur la Galaxy Tab A9+ : ≈ 0,18 à 40 cm pour un adulte ; tolère ~25 à ~65 cm, et un visage d'enfant
                                 val distance = when {
-                                    feat.faceSize > 0.42 -> false to "Trop près de la tablette"
-                                    feat.faceSize < 0.16 -> false to "Trop loin de la tablette"
+                                    feat.faceSize > 0.32 -> false to "Trop près de la tablette"
+                                    feat.faceSize < 0.10 -> false to "Trop loin de la tablette"
                                     else -> true to "Distance correcte"
                                 }
                                 StatusLine(distance.first, distance.second, distance.second)
