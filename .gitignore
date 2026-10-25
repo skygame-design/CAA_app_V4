@@ -14,3 +14,6 @@
 .cxx
 local.properties
 .kotlin
+
+# Copies des données de la tablette (grilles, photos, réglages) : restent sur le PC
+/sauvegardes_tablette

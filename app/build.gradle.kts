@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.nina"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -24,8 +24,22 @@ android {
         }
     }
 
+    signingConfigs {
+        // Même clé que la version de développement installée sur la tablette : la version finale s'installe
+        // par-dessus sans désinstaller, donc sans perdre grilles, photos, calibration et réglages.
+        // Cette clé (dossier .android de l'utilisateur) doit être sauvegardée : sans elle, plus de mise à jour possible.
+        create("tablette") {
+            storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("tablette")
+            // Pas de réduction du code (R8) pour l'instant : elle peut casser la lecture des données enregistrées (Gson)
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
