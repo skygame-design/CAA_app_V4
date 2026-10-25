@@ -294,149 +294,39 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             }
                         }
 
-                    // Pendant un glisser-déposer : rester 0,7 s sur un bouton de page (◀ ▶ de la grille, ▲ ▼ des colonnes)
-                    // tourne la page, pour déplacer un picto vers une autre page
-                    LaunchedEffect(dndState.isDragging) {
-                        var hovered: Pair<String, Int>? = null
-                        var hoverStart = 0L
-                        while (dndState.isDragging) {
-                            val position = dndState.dragOffset
-                            val target = when {
-                                nextPageRect.contains(position) -> "grid" to 1
-                                previousPageRect.contains(position) -> "grid" to -1
-                                leftNextRect.contains(position) -> "left" to 1
-                                leftPreviousRect.contains(position) -> "left" to -1
-                                rightNextRect.contains(position) -> "right" to 1
-                                rightPreviousRect.contains(position) -> "right" to -1
-                                else -> null
-                            }
-                            val now = System.currentTimeMillis()
-                            if (target != hovered) {
-                                hovered = target; hoverStart = now
-                            } else if (target != null && now - hoverStart > 700) {
-                                val (zone, direction) = target
-                                when (zone) {
-                                    "grid" -> gridPage = (gridPage + direction).coerceIn(0, gridLayout.pageCount - 1)
-                                    "left" -> leftPage = (leftPage + direction).coerceIn(0, leftLayout.pageCount - 1)
-                                    "right" -> rightPage = (rightPage + direction).coerceIn(0, rightLayout.pageCount - 1)
-                                }
-                                hoverStart = now
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            }
-                            kotlinx.coroutines.delay(50)
-                        }
+                    // Pendant un glisser-déposer : rester sur un bouton de page tourne la page
+                    DragPageTurns(dndState, haptic) {
+                        listOf(
+                            nextPageRect to { gridPage = (gridPage + 1).coerceIn(0, gridLayout.pageCount - 1) },
+                            previousPageRect to { gridPage = (gridPage - 1).coerceIn(0, gridLayout.pageCount - 1) },
+                            leftNextRect to { leftPage = (leftPage + 1).coerceIn(0, leftLayout.pageCount - 1) },
+                            leftPreviousRect to { leftPage = (leftPage - 1).coerceIn(0, leftLayout.pageCount - 1) },
+                            rightNextRect to { rightPage = (rightPage + 1).coerceIn(0, rightLayout.pageCount - 1) },
+                            rightPreviousRect to { rightPage = (rightPage - 1).coerceIn(0, rightLayout.pageCount - 1) }
+                        )
                     }
 
                     // --- LOGIQUE DE DROP ---
                     val onDropRequest: (Offset, AACCell) -> Unit = { screenPos, droppedCell ->
-                        val target = dndState.currentTargetCell
-                        val mode = dndState.currentDropMode
-
-                        // 1. Est-ce qu'on lâche dans la barre de gauche (Core Words) ?
-                        if (sidebarRect.contains(screenPos)) {
-                            if (!coreWords.any { it.label == droppedCell.label }) {
-                                coreWords.add(droppedCell.copy(id = newCellId(), isQuickPhrase = false)) // Copie : nouvel id
-                                storage.saveCoreWords(coreWords)
-                            }
-                        } 
-                        // 2. Est-ce qu'on lâche dans la barre de droite (Quick Fires) ?
-                        else if (quickFiresRect.contains(screenPos)) {
-                            if (!quickFires.any { it.label == droppedCell.label }) {
-                                quickFires.add(droppedCell.copy(id = newCellId(), isQuickPhrase = true)) // Copie : nouvel id
-                                storage.saveQuickFires(quickFires)
-                            }
+                        val outcome = applyDrop(
+                            droppedCell, dndState.currentTargetCell, dndState.currentDropMode,
+                            onCoreColumn = sidebarRect.contains(screenPos), onQuickColumn = quickFiresRect.contains(screenPos),
+                            coreWords = coreWords, quickFires = quickFires, grid = currentButtons
+                        )
+                        when (outcome) {
+                            DropOutcome.CORE -> storage.saveCoreWords(coreWords)
+                            DropOutcome.QUICK -> storage.saveQuickFires(quickFires)
+                            DropOutcome.GRID -> storage.saveButtons(boutons)
+                            DropOutcome.NONE -> {}
                         }
-                        else if (target != null && target != droppedCell) {
-                            // 3. Logique d'Advanced Drop (Swap / Insert)
-                            val draggedIndex = currentButtons.indexOfCell(droppedCell)
-                            val targetIndex = currentButtons.indexOfCell(target)
-                            
-                            if (draggedIndex != -1 && targetIndex != -1) {
-                                when (mode) {
-                                    DropTargetMode.SWAP -> {
-                                        val temp = currentButtons[draggedIndex]
-                                        currentButtons[draggedIndex] = currentButtons[targetIndex]
-                                        currentButtons[targetIndex] = temp
-                                    }
-                                    DropTargetMode.INSERT_BEFORE, DropTargetMode.INSERT_AFTER -> {
-                                        currentButtons.removeAt(draggedIndex)
-                                        var newTargetIndex = currentButtons.indexOfCell(target)
-                                        if (mode == DropTargetMode.INSERT_AFTER) {
-                                            newTargetIndex += 1
-                                        }
-                                        currentButtons.add(newTargetIndex, droppedCell.copy(isQuickPhrase = false))
-                                    }
-                                    else -> {}
-                                }
-                                storage.saveButtons(boutons)
-                            }
-                        }
-                        
-                        // Nettoyage
                         dndState.currentTargetCell = null
                         dndState.currentDropMode = DropTargetMode.NONE
                     }
 
                     // Le gestionnaire de dépôt change à chaque recomposition (il travaille sur la liste affichée, accueil ou dossier) :
-                    // le pointerInput ci-dessous, créé une seule fois, doit toujours appeler la version à jour
+                    // le suivi du doigt, créé une seule fois, appelle toujours la version à jour
                     val currentOnDropRequest by rememberUpdatedState(onDropRequest)
-
-                    // Modificateur PERMANENT sur le Root
-                    val rootModifier = Modifier.pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) { // Écoute infinie
-                                // Lecture prioritaire sans bloquer les enfants (sauf si consume() est appelé)
-                                val event = awaitPointerEvent(PointerEventPass.Initial)
-                                
-                                // On agit UNIQUEMENT si un Drag a été initié par un appui long dans une cellule
-                                if (dndState.isDragging) {
-                                    val change = event.changes.firstOrNull()
-
-                                    if (change == null || !change.pressed) {
-                                        Log.d("Nina-Debug", "🏠 Root : Relâché détecté, exécution du Drop")
-                                        dndState.draggedCell?.let { currentOnDropRequest(dndState.dragOffset, it) }
-                                        dndState.isDragging = false
-                                        dndState.draggedCell = null
-                                    } else {
-                                        // Le doigt bouge ! On met à jour la position
-                                        dndState.dragOffset = change.position
-
-                                        // NOUVEAU : Calcul visuel en temps réel
-                                        val localOffset = dndState.dragOffset - gridRect.topLeft
-                                        var hoveredCell: AACCell? = null
-                                        var hoveredRect: Rect? = null
-                                        
-                                        for ((gridCell, bounds) in gridCellsBounds) {
-                                            val localBounds = bounds.translate(-gridRect.topLeft)
-                                            if (localBounds.contains(localOffset)) {
-                                                hoveredCell = gridCell
-                                                hoveredRect = localBounds
-                                                break
-                                            }
-                                        }
-
-                                        if (hoveredCell != null && hoveredCell != dndState.draggedCell) {
-                                            dndState.currentTargetCell = hoveredCell
-                                            val cellWidth = hoveredRect!!.width
-                                            val relativeX = localOffset.x - hoveredRect.left
-                                            
-                                            dndState.currentDropMode = when {
-                                                relativeX < cellWidth * 0.25f -> DropTargetMode.INSERT_BEFORE
-                                                relativeX > cellWidth * 0.75f -> DropTargetMode.INSERT_AFTER
-                                                else -> DropTargetMode.SWAP
-                                            }
-                                        } else {
-                                            dndState.currentTargetCell = null
-                                            dndState.currentDropMode = DropTargetMode.NONE
-                                        }
-
-                                        // Crucial : On consomme l'événement pour empêcher la grille de scroller
-                                        change.consume() 
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    val rootModifier = Modifier.dragAndDropTracking(dndState, { gridRect }, gridCellsBounds) { pos, cell -> currentOnDropRequest(pos, cell) }
 
                     Surface(
                         modifier = Modifier
