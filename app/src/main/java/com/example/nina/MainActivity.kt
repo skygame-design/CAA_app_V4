@@ -228,10 +228,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     val gazeGrid = remember(gazeProfileVersion) { GazeStore.gazeGrid(context) }
                     val gazeGridColumns = remember(gazeProfileVersion) { GazeStore.gazeGridColumns(context) }
                     val gazeTwoStep = remember(gazeProfileVersion) { GazeStore.twoStep(context) }
-                    val gazeAutoZoom = remember(gazeProfileVersion) { GazeStore.autoZoomSmall(context) }
                     val gazeGridOn = gazeActive && gazeSelectionEnabled && gazeGrid
                     val gazeZoom = remember { GazeZoom() }
-                    LaunchedEffect(gazeTwoStep, gazeAutoZoom, gazeActive) { if (!(gazeTwoStep || gazeAutoZoom) || !gazeActive) gazeZoom.active = false }
+                    LaunchedEffect(gazeTwoStep, gazeActive) { if (!gazeTwoStep || !gazeActive) gazeZoom.active = false }
                     val gazeZoomScale by androidx.compose.animation.core.animateFloatAsState(
                         if (gazeZoom.active) GazeZoom.SCALE else 1f, androidx.compose.animation.core.tween(300), label = "zoomRegard"
                     )
@@ -865,9 +864,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             dwellMs = gazeDwellMs,
                             showRawPoint = gazeCursorEnabled,
                             learningEnabled = !isAdminMode && !anyDialogOpen,
-                            zoom = gazeZoom,
-                            twoStepAll = gazeTwoStep,
-                            autoZoomSmall = gazeAutoZoom,
+                            zoom = if (gazeTwoStep) gazeZoom else null,
                             // Calibration continue : les pictos choisis enrichissent la calibration (enregistrée sans relancer le suivi)
                             samples = gazeProfile?.samples.orEmpty(),
                             onSamplesLearned = { learned -> gazeProfile?.let { GazeStore.saveProfile(context, it.copy(samples = learned)) } }

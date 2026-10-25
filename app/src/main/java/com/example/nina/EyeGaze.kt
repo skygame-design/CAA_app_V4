@@ -362,12 +362,6 @@ private fun GazeHome(
                 var gazeGrid by remember { mutableStateOf(GazeStore.gazeGrid(context)) }
                 var gridColumns by remember { mutableIntStateOf(GazeStore.gazeGridColumns(context)) }
                 var twoStep by remember { mutableStateOf(GazeStore.twoStep(context)) }
-                var autoZoom by remember { mutableStateOf(GazeStore.autoZoomSmall(context)) }
-                SettingSwitch(
-                    "Zoom automatique sur les petites cases",
-                    "Dossiers, phrases rapides, Lire, ⌫, ← : à mi-chemin de la fixation, la zone s'agrandit deux fois, puis on termine la fixation sur la case agrandie.",
-                    autoZoom, true
-                ) { autoZoom = it; GazeStore.setAutoZoomSmall(context, it); onSettingsChanged() }
                 SettingSwitch(
                     "Grille adaptée au regard",
                     "Quand la sélection par le regard est active : moins de pictos par rangée et de grands espaces entre les cases, pour des cibles plus faciles à garder.",

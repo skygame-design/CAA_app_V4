@@ -81,9 +81,8 @@ fun Modifier.gazeZone(key: String, enabled: Boolean = true, onActivate: () -> Un
 }
 
 /**
- * Zoom de la sélection par le regard : l'écran principal est agrandi autour d'un point,
- * on fixe alors le picto agrandi pour l'activer, et l'écran revient à la normale.
- * Deux usages : avant chaque sélection (sélection en deux temps), ou seulement pour les petites cases.
+ * Sélection en deux temps : fixer une zone l'agrandit (l'écran principal est zoomé autour du point fixé),
+ * puis fixer le picto agrandi l'active et l'écran revient à la normale.
  */
 class GazeZoom {
     var active by mutableStateOf(false)
@@ -97,8 +96,6 @@ class GazeZoom {
         const val SETTLE_MS = 400L
         /** Sans picto activé pendant ce temps, l'écran revient à la normale. */
         const val TIMEOUT_MS = 4000L
-        /** Case « petite » (zoom automatique) : son plus petit côté fait moins que ça. */
-        const val SMALL_CM = 2.5
         /** Attraction minimale de l'aimant autour de chaque case, quelle que soit sa taille. */
         const val MIN_REACH_CM = 1.3
     }
@@ -121,9 +118,7 @@ fun GazeSelectionOverlay(
     learningEnabled: Boolean = selectionEnabled,
     samples: List<GazeSample> = emptyList(),
     onSamplesLearned: (List<GazeSample>) -> Unit = {},
-    zoom: GazeZoom? = null,
-    twoStepAll: Boolean = false, // Zoom avant chaque sélection
-    autoZoomSmall: Boolean = false // Zoom seulement quand la case visée est petite
+    zoom: GazeZoom? = null // Non nul : sélection en deux temps
 ) {
     // Modèle qui s'enrichit pendant l'utilisation (repart de la calibration enregistrée si elle change)
     var liveSamples by remember(model) { mutableStateOf(samples) }
@@ -157,7 +152,6 @@ fun GazeSelectionOverlay(
             k to NormRect(ox + (r.left - ox) * s, oy + (r.top - oy) * s, ox + (r.right - ox) * s, oy + (r.bottom - oy) * s)
         }.filter { (_, r) -> r.right > 0 && r.left < 1 && r.bottom > 0 && r.top < 1 }
     }
-    fun isSmall(r: NormRect) = minOf(r.width * widthCm, r.height * heightCm) < GazeZoom.SMALL_CM
 
     /** Mesures des yeux au moment du choix, picto réellement visé, point estimé alors. */
     class Choice(val key: String, val rect: NormRect, val regressors: DoubleArray, val faceSize: Double, val estimated: Pair<Double, Double>)
@@ -193,7 +187,7 @@ fun GazeSelectionOverlay(
         onDispose { registry.onTouch = null }
     }
 
-    LaunchedEffect(model, selectionEnabled, zoom, twoStepAll, autoZoomSmall) {
+    LaunchedEffect(model, selectionEnabled, zoom) {
         var signature = ""
         var lastZoomActivity = 0L
         fun startZoom(x: Double, y: Double, now: Long) {
@@ -213,7 +207,7 @@ fun GazeSelectionOverlay(
             pending?.let { (choice, time) -> if (now - time > 2000) { pending = null; learnFrom(choice) } }
 
             // Sélection en deux temps, première étape : fixer un endroit (n'importe où) pour l'agrandir
-            if (z != null && twoStepAll && selectionEnabled && !z.active) {
+            if (z != null && selectionEnabled && !z.active) {
                 currentKey = null; currentRect = null; progress = 0f
                 if (p == null) { zoomAnchor = null; zoomProgress = 0f; return@collect }
                 val anchor = zoomAnchor
@@ -244,13 +238,7 @@ fun GazeSelectionOverlay(
             val zones = currentZones()
             // Les zones ont changé (page, dossier) : on repart de zéro
             val sig = zones.joinToString(",") { it.first }
-            if (sig != signature) {
-                signature = sig; magnet.reset(); dwell.reset()
-                if (z == null || !z.active) android.util.Log.d("Nina-Regard", "Cases : %d, dont petites (< %.1f cm) : %s".format(
-                    zones.size, GazeZoom.SMALL_CM,
-                    zones.filter { isSmall(it.second) }.joinToString { (k, r) -> "%s %.1f×%.1f".format(k.substringBefore("_"), r.width * widthCm, r.height * heightCm) }
-                ))
-            }
+            if (sig != signature) { signature = sig; magnet.reset(); dwell.reset() }
             val index = if (p == null) null else magnet.update(zones.map { it.second }, p.first, p.second, now)
             currentKey = index?.let { zones.getOrNull(it)?.first }
             currentRect = index?.let { zones.getOrNull(it)?.second }
@@ -259,13 +247,7 @@ fun GazeSelectionOverlay(
             progress = pr
             if (pr > 0f) lastZoomActivity = now
             // L'anneau qui se remplit est montré sur sa propre case (elle peut rester un instant après un écart)
-            val filling = if (pr > 0f) dwell.zone?.let { zones.getOrNull(it) } else null
-            filling?.let { currentKey = it.first; currentRect = it.second }
-            // Petite case : à mi-chemin de la fixation, on l'agrandit (autour de son centre, elle reste sous le regard)
-            if (z != null && autoZoomSmall && !twoStepAll && !z.active && filling != null && pr >= 0.5f && isSmall(filling.second)) {
-                startZoom(filling.second.centerX, filling.second.centerY, now)
-                return@collect
-            }
+            if (pr > 0f) dwell.zone?.let { zones.getOrNull(it) }?.let { currentKey = it.first; currentRect = it.second }
             if (fired != null) zones.getOrNull(fired)?.let { (key, rect) ->
                 pending = if (isCorrection(key)) null else choiceNow(key, rect)?.let { it to now }
                 registry.zones[key]?.onActivate?.invoke()

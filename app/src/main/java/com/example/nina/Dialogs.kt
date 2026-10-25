@@ -1842,7 +1842,6 @@ private val helpTopics = listOf(
             HelpRows(
                 "Si le pointeur manque de précision", listOf(
                     "Grille adaptée au regard" to "moins de pictos par rangée (4 conseillés), des dossiers et phrases rapides plus hauts, et de grands espaces entre les cases, quand la sélection par le regard est active",
-                    "Zoom sur les petites cases" to "à mi-chemin de la fixation d'une petite case, la zone s'agrandit deux fois ; on termine la fixation sur la case agrandie (activé par défaut)",
                     "Sélection en deux temps" to "fixer une zone l'agrandit deux fois (anneau bleu), puis fixer le picto agrandi l'active (anneau orange). Sans choix pendant 4 s, l'écran revient à la normale"
                 )
             ),
