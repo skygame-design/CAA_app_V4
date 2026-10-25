@@ -25,6 +25,10 @@ data class NormRect(val left: Double, val top: Double, val right: Double, val bo
     }
 
     fun contains(x: Double, y: Double) = x in left..right && y in top..bottom
+
+    /** Distance réelle du point au rectangle, en hauteurs d'écran (aspect = largeur / hauteur de l'écran). */
+    fun absoluteDistance(x: Double, y: Double, aspect: Double): Double =
+        hypot(maxOf(left - x, 0.0, x - right) * aspect, maxOf(top - y, 0.0, y - bottom))
 }
 
 /**
@@ -33,24 +37,36 @@ data class NormRect(val left: Double, val top: Double, val right: Double, val bo
  * - pour changer de zone, la nouvelle doit être visée sans interruption pendant switchMs (hystérésis) :
  *   les petits sauts du regard ne font pas « clignoter » la sélection ;
  * - le curseur affiché se place au centre de la zone (stable, rassurant pour l'enfant).
+ * La marge est proportionnelle à la taille de la zone, avec un minimum absolu (minReach, en hauteurs d'écran) :
+ * les petits boutons (Lire, ⌫, dossiers…) attirent le regard d'aussi loin que les grandes cases.
  */
-class GazeMagnet(private val switchMs: Long = 250, private val margin: Double = 0.6, private val keepMargin: Double = 1.2) {
+class GazeMagnet(
+    private val switchMs: Long = 250, private val margin: Double = 0.6, private val keepMargin: Double = 1.2,
+    var minReach: Double = 0.0, var aspect: Double = 1.0
+) {
     var current: Int? = null
         private set
     private var candidate: Int? = null
     private var candidateSince = 0L
 
-    /** Zone la plus proche du point, si elle est dans la marge (en demi-tailles de zone). */
+    /** Proximité du point à la zone : 0 = dedans, 1 = à la limite de la marge (relative ou absolue). */
+    private fun score(r: NormRect, x: Double, y: Double, factor: Double): Double {
+        val relative = r.relativeDistance(x, y) / (margin * factor)
+        val absolute = if (minReach > 0) r.absoluteDistance(x, y, aspect) / (minReach * factor) else Double.MAX_VALUE
+        return minOf(relative, absolute)
+    }
+
+    /** Zone la plus proche du point, si elle est dans la marge. */
     fun nearest(zones: List<NormRect>, x: Double, y: Double): Int? =
-        zones.indices.minByOrNull { zones[it].relativeDistance(x, y) }
-            ?.takeIf { zones[it].relativeDistance(x, y) <= margin }
+        zones.indices.minByOrNull { score(zones[it], x, y, 1.0) }
+            ?.takeIf { score(zones[it], x, y, 1.0) <= 1.0 }
 
     fun update(zones: List<NormRect>, x: Double, y: Double, timeMs: Long): Int? {
         var near = nearest(zones, x, y)
         // Hystérésis : la case choisie est gardée tant que le point reste à peu près dessus (marge plus large),
         // sauf s'il entre franchement dans une autre case
         val cur = current
-        if (cur != null && cur < zones.size && near != cur && zones[cur].relativeDistance(x, y) <= keepMargin &&
+        if (cur != null && cur < zones.size && near != cur && score(zones[cur], x, y, keepMargin / margin) <= 1.0 &&
             (near == null || !zones[near].contains(x, y))) near = cur
         when {
             near == current -> candidate = null
@@ -147,4 +163,21 @@ object GazeCalibrationPlan {
      */
     fun merge(old: List<GazeSample>, new: List<GazeSample>, radius: Double = 0.03): List<GazeSample> =
         old.filter { o -> new.none { n -> hypot(n.targetX - o.targetX, n.targetY - o.targetY) < radius } } + new
+
+    /**
+     * Calibration continue : un picto choisi pendant l'utilisation devient un point de calibration.
+     * S'il existe déjà un point au même endroit, les deux sont mélangés (weight = part du nouveau) :
+     * la calibration suit l'état du jour sans qu'une seule mesure ne la bouleverse.
+     * Au-delà de `max` points, seuls les endroits déjà connus sont mis à jour.
+     */
+    fun learn(samples: List<GazeSample>, new: GazeSample, radius: Double = 0.03, weight: Double = 0.4, max: Int = 80): List<GazeSample> {
+        val i = samples.indexOfFirst { hypot(it.targetX - new.targetX, it.targetY - new.targetY) < radius && it.features.size == new.features.size }
+        if (i < 0) return if (samples.size < max) samples + new else samples
+        val old = samples[i]
+        val mixed = GazeSample(
+            DoubleArray(old.features.size) { old.features[it] * (1 - weight) + new.features[it] * weight },
+            old.targetX * (1 - weight) + new.targetX * weight, old.targetY * (1 - weight) + new.targetY * weight
+        )
+        return samples.toMutableList().also { it[i] = mixed }
+    }
 }

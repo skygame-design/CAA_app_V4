@@ -228,9 +228,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     val gazeGrid = remember(gazeProfileVersion) { GazeStore.gazeGrid(context) }
                     val gazeGridColumns = remember(gazeProfileVersion) { GazeStore.gazeGridColumns(context) }
                     val gazeTwoStep = remember(gazeProfileVersion) { GazeStore.twoStep(context) }
+                    val gazeAutoZoom = remember(gazeProfileVersion) { GazeStore.autoZoomSmall(context) }
                     val gazeGridOn = gazeActive && gazeSelectionEnabled && gazeGrid
                     val gazeZoom = remember { GazeZoom() }
-                    LaunchedEffect(gazeTwoStep, gazeActive) { if (!gazeTwoStep || !gazeActive) gazeZoom.active = false }
+                    LaunchedEffect(gazeTwoStep, gazeAutoZoom, gazeActive) { if (!(gazeTwoStep || gazeAutoZoom) || !gazeActive) gazeZoom.active = false }
                     val gazeZoomScale by androidx.compose.animation.core.animateFloatAsState(
                         if (gazeZoom.active) GazeZoom.SCALE else 1f, androidx.compose.animation.core.tween(300), label = "zoomRegard"
                     )
@@ -639,6 +640,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                             onLayout = { if (it != leftLayout) leftLayout = it },
                                             onSpeak = { speakText(it, voicePitch, voiceRate) },
                                             gazeKey = "pages_gauche",
+                                            // Regard : cases plus hautes (moins de dossiers par page), plus espacées
+                                            minItemHeight = if (gazeGridOn) 130.dp else 80.dp,
+                                            gap = if (gazeGridOn) 24.dp else 12.dp,
                                             onPagerBounds = { previous, next -> leftPreviousRect = previous; leftNextRect = next },
                                             modifier = Modifier.weight(1f).fillMaxWidth()
                                         ) { index, slotModifier ->
@@ -798,6 +802,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     onLayout = { if (it != rightLayout) rightLayout = it },
                                     onSpeak = { speakText(it, voicePitch, voiceRate) },
                                     gazeKey = "pages_droite",
+                                    minItemHeight = if (gazeGridOn) 130.dp else 80.dp,
+                                    gap = if (gazeGridOn) 24.dp else 12.dp,
                                             onPagerBounds = { previous, next -> rightPreviousRect = previous; rightNextRect = next },
                                     modifier = Modifier
                                         .weight(1f)
@@ -859,11 +865,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             dwellMs = gazeDwellMs,
                             showRawPoint = gazeCursorEnabled,
                             learningEnabled = !isAdminMode && !anyDialogOpen,
-                            zoom = if (gazeTwoStep) gazeZoom else null,
-                            onDriftLearned = { dx, dy ->
-                                // Décalage appris pendant l'utilisation : enregistré dans le profil (sans relancer le suivi)
-                                gazeProfile?.let { GazeStore.saveProfile(context, it.copy(offsetX = it.offsetX + dx, offsetY = it.offsetY + dy)) }
-                            }
+                            zoom = gazeZoom,
+                            twoStepAll = gazeTwoStep,
+                            autoZoomSmall = gazeAutoZoom,
+                            // Calibration continue : les pictos choisis enrichissent la calibration (enregistrée sans relancer le suivi)
+                            samples = gazeProfile?.samples.orEmpty(),
+                            onSamplesLearned = { learned -> gazeProfile?.let { GazeStore.saveProfile(context, it.copy(samples = learned)) } }
                         )
                     }
 

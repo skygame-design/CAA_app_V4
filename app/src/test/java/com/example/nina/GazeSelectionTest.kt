@@ -108,18 +108,37 @@ class GazeSelectionTest {
     }
 
     @Test
-    fun driftLearner_catchesUpWithAConstantOffset_andIgnoresOutliers() {
-        val l = DriftLearner()
-        // Le point estimé tombe toujours 0,08 à gauche et 0,05 en dessous du picto regardé
-        repeat(15) {
-            val (ex, ey) = l.apply(0.5 - 0.08, 0.4 + 0.05)
-            l.learn(ex, ey, 0.5, 0.4)
-        }
-        assertEquals(0.08, l.offsetX, 0.01)
-        assertEquals(-0.05, l.offsetY, 0.01)
-        // Activation très loin du point estimé : sûrement pas le picto regardé, rien n'est appris
-        assertTrue(!l.learn(0.1, 0.1, 0.9, 0.9))
-        assertEquals(0.08, l.offsetX, 0.01)
+    fun magnet_smallButtonsAttractFromAMinimumDistance() {
+        // Petit bouton (2 % × 3 % de l'écran) et point à 0,05 hauteur d'écran de son bord
+        val small = listOf(NormRect(0.90, 0.02, 0.92, 0.05))
+        val proportional = GazeMagnet(switchMs = 0)
+        repeat(3) { proportional.update(small, 0.91, 0.10, it * 50L) }
+        assertNull("marge proportionnelle seule : trop petite", proportional.current)
+        val withReach = GazeMagnet(switchMs = 0, minReach = 0.08, aspect = 1.6)
+        repeat(3) { withReach.update(small, 0.91, 0.10, it * 50L) }
+        assertEquals(0, withReach.current)
+    }
+
+    @Test
+    fun continuousCalibration_blendsKnownPlaces_andAddsNewOnes() {
+        val base = listOf(GazeSample(doubleArrayOf(1.0, 1.0), 0.2, 0.2), GazeSample(doubleArrayOf(2.0, 2.0), 0.8, 0.8))
+        // Même picto (à 1 % près) : mélange 60 % ancien / 40 % nouveau, pas de point en plus
+        val blended = GazeCalibrationPlan.learn(base, GazeSample(doubleArrayOf(2.0, 1.0), 0.21, 0.2))
+        assertEquals(2, blended.size)
+        assertEquals(1.4, blended[0].features[0], 1e-9)
+        assertEquals(0.204, blended[0].targetX, 1e-9)
+        // Nouvel endroit : ajouté
+        assertEquals(3, GazeCalibrationPlan.learn(base, GazeSample(doubleArrayOf(0.0, 0.0), 0.5, 0.5)).size)
+        // Plafond atteint : seuls les endroits connus sont mis à jour
+        assertEquals(2, GazeCalibrationPlan.learn(base, GazeSample(doubleArrayOf(0.0, 0.0), 0.5, 0.5), max = 2).size)
+    }
+
+    @Test
+    fun correctionInvert_undoesApply() {
+        val c = GazeCorrection(refFaceSize = 0.19, offsetX = 0.02, offsetY = -0.01)
+        val (mx, my) = c.invert(0.8, 0.3, faceSize = 0.15)
+        val (x, y) = c.apply(mx, my, faceSize = 0.15)
+        assertEquals(0.8, x, 1e-9); assertEquals(0.3, y, 1e-9)
     }
 
     @Test

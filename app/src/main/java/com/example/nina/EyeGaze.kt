@@ -39,7 +39,7 @@ import java.util.Date
 
 /** Taille de l'écran en cm (pour exprimer la précision en cm, plus parlant qu'en pixels). */
 @Composable
-private fun screenSizeCm(): Pair<Double, Double> {
+internal fun screenSizeCm(): Pair<Double, Double> {
     val m = LocalContext.current.resources.displayMetrics
     return (m.widthPixels / m.xdpi * 2.54) to (m.heightPixels / m.ydpi * 2.54)
 }
@@ -362,6 +362,12 @@ private fun GazeHome(
                 var gazeGrid by remember { mutableStateOf(GazeStore.gazeGrid(context)) }
                 var gridColumns by remember { mutableIntStateOf(GazeStore.gazeGridColumns(context)) }
                 var twoStep by remember { mutableStateOf(GazeStore.twoStep(context)) }
+                var autoZoom by remember { mutableStateOf(GazeStore.autoZoomSmall(context)) }
+                SettingSwitch(
+                    "Zoom automatique sur les petites cases",
+                    "Dossiers, phrases rapides, Lire, ⌫, ← : à mi-chemin de la fixation, la zone s'agrandit deux fois, puis on termine la fixation sur la case agrandie.",
+                    autoZoom, true
+                ) { autoZoom = it; GazeStore.setAutoZoomSmall(context, it); onSettingsChanged() }
                 SettingSwitch(
                     "Grille adaptée au regard",
                     "Quand la sélection par le regard est active : moins de pictos par rangée et de grands espaces entre les cases, pour des cibles plus faciles à garder.",
@@ -615,29 +621,46 @@ private fun CalibrationResult(
     }
 }
 
+/** Dernières mesures ayant servi au pointeur : la calibration continue s'en sert quand un picto est choisi. */
+class GazeSnapshot {
+    @Volatile var regressors: DoubleArray? = null
+    @Volatile var faceSize: Double = 0.0
+}
+
 /**
- * Position du regard stabilisée, en coordonnées normalisées ; null si les yeux ne sont pas visibles.
- * 1. médiane des 5 dernières mesures (un iris mal repéré sur une image est ignoré) ;
- * 2. filtre de fixation : le pointeur reste immobile tant que le regard reste dans la même zone,
- *    et ne se déplace que sur un vrai mouvement de l'œil.
+ * Position du regard stabilisée (médiane des 5 dernières mesures, puis filtre de fixation), null si les yeux
+ * ne sont pas visibles. Le modèle peut changer en cours de route (calibration continue) sans remettre
+ * les filtres à zéro. L'angle de la tête est lissé avant la compensation : il tremble d'environ 1° d'une image
+ * à l'autre, ce qui faisait trembler le pointeur d'environ 1 cm, alors que la tête, elle, bouge lentement.
  */
 @Composable
-fun rememberGazePoint(tracker: GazeTracker, model: GazeModel, correction: GazeCorrection = GazeCorrection()): State<Pair<Double, Double>?> {
-    val median = remember(model, correction) { MedianWindow(5) }
-    val faceSizes = remember(model, correction) { MedianWindow(9) }
-    val fixation = remember(model, correction) { FixationFilter() }
-    val point = remember(model, correction) { mutableStateOf<Pair<Double, Double>?>(null) }
-    LaunchedEffect(model, correction) {
+fun rememberGazePoint(
+    tracker: GazeTracker, model: GazeModel, correction: GazeCorrection = GazeCorrection(), snapshot: GazeSnapshot? = null
+): State<Pair<Double, Double>?> {
+    val currentModel by rememberUpdatedState(model)
+    val median = remember(correction) { MedianWindow(5) }
+    val faceSizes = remember(correction) { MedianWindow(9) }
+    val fixation = remember(correction) { FixationFilter() }
+    val yawFilter = remember(correction) { OneEuroFilter(minCutoff = 0.3, beta = 1.0) }
+    val pitchFilter = remember(correction) { OneEuroFilter(minCutoff = 0.3, beta = 1.0) }
+    val point = remember(correction) { mutableStateOf<Pair<Double, Double>?>(null) }
+    LaunchedEffect(tracker, correction) {
         tracker.frames.filterNotNull().collect { f ->
             val feat = f.features
             if (f.usable && feat != null) {
-                val (rx, ry) = model.predict(median.add(model.regressorsOf(feat)))
+                val m = currentModel
+                val smooth = feat.copy(yaw = yawFilter.filter(feat.yaw, f.timeMs), pitch = pitchFilter.filter(feat.pitch, f.timeMs))
+                val regs = median.add(m.regressorsOf(smooth))
+                val (rx, ry) = m.predict(regs)
                 // Distance différente de celle de la calibration : on corrige (taille du visage lissée sur 9 images)
-                val (x, y) = correction.apply(rx, ry, faceSizes.add(doubleArrayOf(feat.faceSize))[0])
+                val faceSize = faceSizes.add(doubleArrayOf(feat.faceSize))[0]
+                val (x, y) = correction.apply(rx, ry, faceSize)
+                snapshot?.let { it.regressors = regs; it.faceSize = faceSize }
                 val (sx, sy) = fixation.filter(clamp01(x), clamp01(y))
                 point.value = sx to sy
             } else if (!f.faceDetected) {
-                point.value = null; median.reset(); faceSizes.reset(); fixation.reset()
+                point.value = null; median.reset(); faceSizes.reset(); fixation.reset(); yawFilter.reset(); pitchFilter.reset()
+                snapshot?.regressors = null
             }
         }
     }

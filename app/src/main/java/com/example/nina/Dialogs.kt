@@ -1834,13 +1834,15 @@ private val helpTopics = listOf(
                     "Fixation" to "l'anneau orange se remplit (1,2 s par défaut, réglable) : un coup d'œil ou un clignement ne déclenche rien",
                     "Repos" to "après une sélection, la même case ne se redéclenche qu'après un court repos",
                     "Rotation de la tête" to "mesurée au début de la calibration, puis compensée : tourner un peu la tête ne fait plus dériver le pointeur",
-                    "Correction automatique" to "chaque picto touché, ou choisi du regard sans être effacé aussitôt, corrige un peu le décalage restant",
+                    "Calibration continue" to "chaque picto touché, ou choisi du regard sans être effacé aussitôt, devient un point de calibration : la calibration s'adapte à l'enfant au fil de l'utilisation, zone par zone",
+                    "Petits boutons" to "dossiers, phrases rapides, Lire, ⌫ attirent le regard dans un rayon d'au moins 1,3 cm",
                     "Anneau tolérant" to "un tremblement ou un passage entre deux cases met l'anneau en pause au lieu de le vider"
                 )
             ),
             HelpRows(
                 "Si le pointeur manque de précision", listOf(
-                    "Grille adaptée au regard" to "moins de pictos par rangée (4 conseillés) et de grands espaces entre les cases, quand la sélection par le regard est active",
+                    "Grille adaptée au regard" to "moins de pictos par rangée (4 conseillés), des dossiers et phrases rapides plus hauts, et de grands espaces entre les cases, quand la sélection par le regard est active",
+                    "Zoom sur les petites cases" to "à mi-chemin de la fixation d'une petite case, la zone s'agrandit deux fois ; on termine la fixation sur la case agrandie (activé par défaut)",
                     "Sélection en deux temps" to "fixer une zone l'agrandit deux fois (anneau bleu), puis fixer le picto agrandi l'active (anneau orange). Sans choix pendant 4 s, l'écran revient à la normale"
                 )
             ),

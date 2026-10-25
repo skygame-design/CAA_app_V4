@@ -322,6 +322,11 @@ object GazeStore {
     fun twoStep(context: Context) = prefs(context).getBoolean(KEY_TWO_STEP, false)
     fun setTwoStep(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean(KEY_TWO_STEP, enabled).apply()
 
+    /** Zoom automatique sur les petites cases (dossiers, phrases rapides, Lire, ⌫…), activé par défaut. */
+    private const val KEY_AUTO_ZOOM = "gaze_auto_zoom_small"
+    fun autoZoomSmall(context: Context) = prefs(context).getBoolean(KEY_AUTO_ZOOM, true)
+    fun setAutoZoomSmall(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean(KEY_AUTO_ZOOM, enabled).apply()
+
     fun cursorEnabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CURSOR, false)
     fun setCursorEnabled(context: Context, enabled: Boolean) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CURSOR, enabled).apply()
