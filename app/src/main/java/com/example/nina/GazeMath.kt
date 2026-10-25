@@ -353,6 +353,43 @@ data class GazeCorrection(val refFaceSize: Double? = null, val offsetX: Double =
     fun withoutOffset() = copy(offsetX = 0.0, offsetY = 0.0)
 }
 
+/**
+ * Repérage fin de l'iris dans l'image en haute définition : MediaPipe ne voit le visage qu'en 256 × 256 pixels,
+ * alors que la caméra en fournit beaucoup plus. Autour de l'iris trouvé par MediaPipe, on cherche le centre
+ * de la zone sombre (iris + pupille) pixel par pixel, avec une précision inférieure au pixel.
+ *
+ * @param gray niveaux de gris (0..255) d'un recadrage w × h autour de l'œil, ligne par ligne
+ * @param cx, cy centre de l'iris selon MediaPipe, en pixels du recadrage
+ * @param radius rayon de l'iris selon MediaPipe, en pixels
+ * @param top, bottom hauteur des paupières (pixels du recadrage) : la peau au-dessus et en dessous est ignorée
+ * @return centre affiné (pixels du recadrage), ou null si le résultat n'est pas fiable (reflet, œil fermé…)
+ */
+fun darkCentroid(gray: IntArray, w: Int, h: Int, cx: Double, cy: Double, radius: Double, top: Double, bottom: Double): Pair<Double, Double>? {
+    if (radius < 2 || w * h != gray.size) return null
+    val r = radius * 1.3
+    val inside = mutableListOf<Int>() // indices des pixels dans le cercle de recherche, entre les paupières
+    for (y in 0 until h) {
+        if (y < top || y > bottom) continue
+        for (x in 0 until w) if (hypot(x - cx, y - cy) <= r) inside += y * w + x
+    }
+    if (inside.size < 20) return null
+    // Seuil : les 35 % de pixels les plus sombres de la zone (iris et pupille sont plus sombres que le blanc de l'œil)
+    val sorted = inside.map { gray[it] }.sorted()
+    val threshold = sorted[(sorted.size * 0.35).toInt()]
+    var sw = 0.0; var sx = 0.0; var sy = 0.0
+    for (i in inside) {
+        val v = gray[i]
+        if (v <= threshold) {
+            val wgt = (threshold - v + 1).toDouble() // plus c'est sombre, plus le pixel compte
+            sw += wgt; sx += wgt * (i % w); sy += wgt * (i / w)
+        }
+    }
+    if (sw <= 0) return null
+    val rx = sx / sw; val ry = sy / sw
+    // Garde-fou : le centre affiné doit rester près de celui de MediaPipe (sinon reflet, cils, lunettes…)
+    return if (hypot(rx - cx, ry - cy) <= radius * 0.6) rx to ry else null
+}
+
 /** Positions des cibles de calibration (coordonnées normalisées), dans l'ordre d'affichage. */
 object GazeTargets {
     val calibration9 = listOf(0.5 to 0.5, 0.08 to 0.1, 0.5 to 0.1, 0.92 to 0.1, 0.92 to 0.5, 0.92 to 0.9, 0.5 to 0.9, 0.08 to 0.9, 0.08 to 0.5)

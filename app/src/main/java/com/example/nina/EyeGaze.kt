@@ -112,6 +112,13 @@ fun EyeGazeDialog(
                     cursorEnabled = cursorEnabled, onCursorEnabledChange = onCursorEnabledChange,
                     selectionEnabled = selectionEnabled, onSelectionEnabledChange = onSelectionEnabledChange,
                     dwellMs = dwellMs, onDwellMsChange = onDwellMsChange,
+                    onFineIrisChange = { enabled ->
+                        // Chaque mode a sa propre calibration : on bascule sur celle du mode choisi
+                        tracker.fineIris = enabled
+                        GazeStore.setFineIris(context, enabled)
+                        profile = GazeStore.activeProfile(context)
+                        onProfileChanged()
+                    },
                     onCalibrate = { m -> mode = m; screen = GazeScreen.CALIBRATION },
                     onVerify = { screen = GazeScreen.VERIFICATION },
                     onTrial = { screen = GazeScreen.TRIAL },
@@ -161,7 +168,7 @@ fun EyeGazeDialog(
                         onSave = {
                             // Nouvelle calibration : distance de référence mesurée, décalage remis à zéro
                             val saved = GazeProfile(
-                                "Principal", pendingSamples, System.currentTimeMillis(), error, checkCm, GazeFeatures.FEATURE_VERSION,
+                                GazeStore.profileName(tracker.fineIris), pendingSamples, System.currentTimeMillis(), error, checkCm, GazeFeatures.FEATURE_VERSION,
                                 refFaceSize = pendingRef(plannedCount)
                             )
                             GazeStore.saveProfile(context, saved)
@@ -215,7 +222,7 @@ private fun GazeHome(
     pictoCount: Int,
     cursorEnabled: Boolean, onCursorEnabledChange: (Boolean) -> Unit,
     selectionEnabled: Boolean, onSelectionEnabledChange: (Boolean) -> Unit,
-    dwellMs: Long, onDwellMsChange: (Long) -> Unit,
+    dwellMs: Long, onDwellMsChange: (Long) -> Unit, onFineIrisChange: (Boolean) -> Unit,
     onCalibrate: (CalibrationMode) -> Unit, onVerify: () -> Unit, onTrial: () -> Unit, onRecenter: () -> Unit, onDismiss: () -> Unit
 ) {
     val frame by tracker.frames.collectAsState()
@@ -338,6 +345,12 @@ private fun GazeHome(
                     "Pour l'adulte : un rond orange montre où l'app estime le regard, avant l'aimant vers les cases.",
                     cursorEnabled, profile != null && hasCameraPermission, onCursorEnabledChange
                 )
+                var fineIris by remember { mutableStateOf(tracker.fineIris) }
+                SettingSwitch(
+                    "Repérage fin de l'iris (haute définition)",
+                    "L'iris est recherché dans l'image complète de la caméra pour plus de précision. Chaque mode a sa propre calibration : après un changement, calibrez à nouveau.",
+                    fineIris, hasCameraPermission
+                ) { fineIris = it; onFineIrisChange(it) }
             }
         }
     }

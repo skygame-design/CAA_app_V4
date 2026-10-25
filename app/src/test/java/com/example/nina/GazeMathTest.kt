@@ -124,6 +124,27 @@ class GazeMathTest {
     }
 
     @Test
+    fun darkCentroid_findsTheIrisWithSubPixelPrecision() {
+        // Œil synthétique de 60 × 40 pixels : blanc de l'œil clair, iris sombre de rayon 9 centré en (31,4 ; 19,7), bruit
+        val rnd = Random(5)
+        val w = 60; val h = 40; val ix = 31.4; val iy = 19.7
+        val gray = IntArray(w * h) { i ->
+            val x = i % w; val y = i / w
+            val d = hypot(x - ix, y - iy)
+            val base = if (d < 3.5) 20 else if (d < 9) 70 else 200
+            (base + rnd.nextInt(-15, 15)).coerceIn(0, 255)
+        }
+        // MediaPipe s'est trompé de 2,5 pixels : le repérage fin retrouve le vrai centre
+        val (rx, ry) = darkCentroid(gray, w, h, cx = 29.0, cy = 21.0, radius = 9.0, top = 8.0, bottom = 32.0)!!
+        assertTrue("x : $rx au lieu de $ix", abs(rx - ix) < 0.6)
+        assertTrue("y : $ry au lieu de $iy", abs(ry - iy) < 0.6)
+        // Zone sans iris sombre (œil fermé : tout est de la peau) : pas de résultat fantaisiste loin du centre
+        val skin = IntArray(w * h) { 180 + rnd.nextInt(-10, 10) }
+        val r = darkCentroid(skin, w, h, cx = 29.0, cy = 21.0, radius = 9.0, top = 8.0, bottom = 32.0)
+        assertTrue("peau uniforme : $r", r == null || hypot(r.first - 29.0, r.second - 21.0) < 5.4)
+    }
+
+    @Test
     fun notEnoughPoints_noModel() {
         val few = listOf(GazeSample(doubleArrayOf(0.0, 0.0), 0.5, 0.5), GazeSample(doubleArrayOf(1.0, 1.0), 0.6, 0.6))
         assertNull(GazeModel.fit(few))
