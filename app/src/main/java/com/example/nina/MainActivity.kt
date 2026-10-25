@@ -215,7 +215,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     var gazeSelectionEnabled by remember { mutableStateOf(GazeStore.selectionEnabled(context)) } // Sélection par fixation
                     var gazeDwellMs by remember { mutableLongStateOf(GazeStore.dwellMs(context)) }
                     var gazeProfileVersion by remember { mutableIntStateOf(0) } // Change à chaque nouvelle calibration
-                    val gazeModel = remember(gazeProfileVersion) { GazeStore.activeProfile(context)?.model() }
+                    val gazeProfile = remember(gazeProfileVersion) { GazeStore.activeProfile(context) }
+                    val gazeModel = remember(gazeProfile) { gazeProfile?.model() }
                     var hasCameraPermission by remember {
                         mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED)
                     }
@@ -834,7 +835,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         showRecommendedDialog || showAutoBackups || showVoiceHelp || loadNotice
                     if (gazeActive && gazeModel != null) {
                         GazeSelectionOverlay(
-                            tracker = gazeTracker, model = gazeModel, registry = gazeRegistry,
+                            tracker = gazeTracker, model = gazeModel, correction = gazeProfile?.correction() ?: GazeCorrection(), registry = gazeRegistry,
                             selectionEnabled = gazeSelectionEnabled && !isAdminMode && !anyDialogOpen,
                             dwellMs = gazeDwellMs,
                             showRawPoint = gazeCursorEnabled

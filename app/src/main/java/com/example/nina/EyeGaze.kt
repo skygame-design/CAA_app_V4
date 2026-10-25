@@ -50,7 +50,7 @@ private enum class CalibrationMode(val label: String) {
     GENERAL("Calibration générale")         // 9 points répartis sur l'écran
 }
 
-private enum class GazeScreen { HOME, CALIBRATION, CHECK, RESULT, VERIFICATION, TRIAL }
+private enum class GazeScreen { HOME, CALIBRATION, CHECK, RESULT, VERIFICATION, TRIAL, RECENTER }
 
 private val Accent = Color(0xFF4A5D91)
 
@@ -82,6 +82,15 @@ fun EyeGazeDialog(
     var pendingSamples by remember { mutableStateOf<List<GazeSample>>(emptyList()) }
     var plannedCount by remember { mutableIntStateOf(0) }
     var checkCm by remember { mutableStateOf<Double?>(null) } // Vérification faite juste après la calibration
+    var pendingFaceSize by remember { mutableStateOf<Double?>(null) } // Distance (taille du visage) pendant la calibration
+    // Distance de référence de la calibration en cours : retouche = moyenne pondérée avec l'ancienne
+    fun pendingRef(newPoints: Int): Double? {
+        val old = profile?.refFaceSize
+        val now = pendingFaceSize ?: return old
+        if (mode != CalibrationMode.REFINE || old == null) return now
+        val oldPoints = (profile?.samples?.size ?: 0) - newPoints
+        return (old * oldPoints.coerceAtLeast(0) + now * newPoints) / (oldPoints.coerceAtLeast(0) + newPoints).coerceAtLeast(1)
+    }
     val (widthCm, heightCm) = screenSizeCm()
     val centers = remember(pictoZones) { pictoZones.map { it.centerX to it.centerY } }
     val hasPictos = centers.size >= 5
@@ -106,6 +115,7 @@ fun EyeGazeDialog(
                     onCalibrate = { m -> mode = m; screen = GazeScreen.CALIBRATION },
                     onVerify = { screen = GazeScreen.VERIFICATION },
                     onTrial = { screen = GazeScreen.TRIAL },
+                    onRecenter = { screen = GazeScreen.RECENTER },
                     onDismiss = onDismiss
                 )
                 GazeScreen.CALIBRATION -> {
@@ -114,8 +124,10 @@ fun EyeGazeDialog(
                         tracker = tracker, targets = targets,
                         previousSamples = if (mode == CalibrationMode.REFINE) profile?.samples.orEmpty() else emptyList(),
                         previousModel = remember(profile) { profile?.model() },
-                        onFinished = { samples ->
+                        previousCorrection = profile?.correction() ?: GazeCorrection(),
+                        onFinished = { samples, faceSize ->
                             plannedCount = targets.size
+                            pendingFaceSize = faceSize
                             // Retouche : les nouvelles mesures remplacent les anciennes aux mêmes endroits, le reste est gardé
                             pendingSamples = if (mode == CalibrationMode.REFINE) GazeCalibrationPlan.merge(profile?.samples.orEmpty(), samples) else samples
                             checkCm = null
@@ -129,7 +141,7 @@ fun EyeGazeDialog(
                     val model = remember(pendingSamples) { GazeModel.fit(pendingSamples) }
                     if (model == null) screen = GazeScreen.RESULT
                     else VerificationRun(
-                        tracker = tracker, model = model,
+                        tracker = tracker, model = model, correction = GazeCorrection(pendingRef(plannedCount)),
                         targets = if (hasPictos) GazeCalibrationPlan.pickRefineTargets(centers, 5) else GazeTargets.verification5,
                         widthCm = widthCm, heightCm = heightCm,
                         title = "Vérification de la nouvelle calibration",
@@ -142,12 +154,16 @@ fun EyeGazeDialog(
                     val newPoints = if (mode == CalibrationMode.REFINE) pendingSamples.size - (profile?.samples?.size ?: 0) else pendingSamples.size
                     val pendingModel = remember(pendingSamples) { GazeModel.fit(pendingSamples) }
                     CalibrationResult(
-                        tracker = tracker, pendingModel = pendingModel,
+                        tracker = tracker, pendingModel = pendingModel, pendingCorrection = GazeCorrection(pendingRef(plannedCount)),
                         mode = mode, measured = pendingSamples.size, planned = plannedCount, errorCm = error, checkCm = checkCm,
                         refinedFrom = (profile?.checkCm ?: profile?.errorCm).takeIf { mode == CalibrationMode.REFINE },
                         enoughPoints = pendingSamples.size >= 6 && (mode == CalibrationMode.REFINE || newPoints >= 6),
                         onSave = {
-                            val saved = GazeProfile("Principal", pendingSamples, System.currentTimeMillis(), error, checkCm, GazeFeatures.FEATURE_VERSION)
+                            // Nouvelle calibration : distance de référence mesurée, décalage remis à zéro
+                            val saved = GazeProfile(
+                                "Principal", pendingSamples, System.currentTimeMillis(), error, checkCm, GazeFeatures.FEATURE_VERSION,
+                                refFaceSize = pendingRef(plannedCount)
+                            )
                             GazeStore.saveProfile(context, saved)
                             profile = saved
                             onProfileChanged()
@@ -162,13 +178,29 @@ fun EyeGazeDialog(
                     val model = remember(profile) { profile?.model() }
                     if (model == null) screen = GazeScreen.HOME
                     else if (screen == GazeScreen.VERIFICATION) VerificationRun(
-                        tracker = tracker, model = model,
+                        tracker = tracker, model = model, correction = profile!!.correction(),
                         targets = if (hasPictos) GazeCalibrationPlan.pickRefineTargets(centers, 5) else GazeTargets.verification5,
                         widthCm = widthCm, heightCm = heightCm,
                         onClose = { screen = GazeScreen.HOME }
                     )
                     else PictoTrial(
-                        tracker = tracker, model = model, zones = pictoZones, dwellMs = dwellMs,
+                        tracker = tracker, model = model, correction = profile!!.correction(), zones = pictoZones, dwellMs = dwellMs,
+                        onClose = { screen = GazeScreen.HOME }
+                    )
+                }
+                GazeScreen.RECENTER -> {
+                    val current = profile
+                    val model = remember(current) { current?.model() }
+                    if (current == null || model == null) screen = GazeScreen.HOME
+                    else RecenterRun(
+                        tracker = tracker, model = model, correction = current.correction().withoutOffset(),
+                        widthCm = widthCm, heightCm = heightCm,
+                        onDone = { dx, dy ->
+                            val saved = current.copy(offsetX = dx, offsetY = dy)
+                            GazeStore.saveProfile(context, saved)
+                            profile = saved
+                            onProfileChanged()
+                        },
                         onClose = { screen = GazeScreen.HOME }
                     )
                 }
@@ -184,7 +216,7 @@ private fun GazeHome(
     cursorEnabled: Boolean, onCursorEnabledChange: (Boolean) -> Unit,
     selectionEnabled: Boolean, onSelectionEnabledChange: (Boolean) -> Unit,
     dwellMs: Long, onDwellMsChange: (Long) -> Unit,
-    onCalibrate: (CalibrationMode) -> Unit, onVerify: () -> Unit, onTrial: () -> Unit, onDismiss: () -> Unit
+    onCalibrate: (CalibrationMode) -> Unit, onVerify: () -> Unit, onTrial: () -> Unit, onRecenter: () -> Unit, onDismiss: () -> Unit
 ) {
     val frame by tracker.frames.collectAsState()
     val error by tracker.error.collectAsState()
@@ -230,6 +262,15 @@ private fun GazeHome(
                                     else -> true to "Distance correcte"
                                 }
                                 StatusLine(distance.first, distance.second, distance.second)
+                                // Distance par rapport à la calibration : c'est elle qui compte pour la précision
+                                profile?.refFaceSize?.let { ref ->
+                                    val pct = ((ref / feat.faceSize - 1) * 100).toInt()
+                                    when {
+                                        kotlin.math.abs(pct) <= 12 -> StatusLine(true, "Même distance qu'à la calibration", "")
+                                        pct > 0 -> StatusLine(false, "", "Plus loin qu'à la calibration (+$pct %) : rapprochez-vous ou recentrez")
+                                        else -> StatusLine(false, "", "Plus près qu'à la calibration ($pct %) : reculez ou recentrez")
+                                    }
+                                }
                             }
                         }
                     }
@@ -270,6 +311,7 @@ private fun GazeHome(
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(onClick = onVerify, enabled = profile != null && cameraOk) { Text("Vérifier la précision") }
                     OutlinedButton(onClick = onTrial, enabled = profile != null && cameraOk && pictoCount > 0) { Text("Essai sur les pictos") }
+                    OutlinedButton(onClick = onRecenter, enabled = profile != null && cameraOk) { Text("Recentrer (1 point)") }
                 }
             }
         }
@@ -357,8 +399,8 @@ private fun GazeTarget(x: Double, y: Double, collecting: Boolean) {
 @Composable
 private fun CalibrationRun(
     tracker: GazeTracker, targets: List<Pair<Double, Double>>,
-    previousSamples: List<GazeSample>, previousModel: GazeModel?,
-    onFinished: (List<GazeSample>) -> Unit, onCancel: () -> Unit
+    previousSamples: List<GazeSample>, previousModel: GazeModel?, previousCorrection: GazeCorrection,
+    onFinished: (List<GazeSample>, Double?) -> Unit, onCancel: () -> Unit
 ) {
     var index by remember { mutableIntStateOf(0) }
     var collecting by remember { mutableStateOf(false) }
@@ -367,6 +409,8 @@ private fun CalibrationRun(
     // Rond orange pour l'adulte : d'abord la calibration précédente (s'il y en a une),
     // puis la nouvelle dès 6 points mesurés, recalculée après chaque point
     var liveModel by remember { mutableStateOf(previousModel) }
+    var liveCorrection by remember { mutableStateOf(previousCorrection) }
+    val faceSizes = remember { mutableListOf<Double>() }
 
     LaunchedEffect(targets) {
         val samples = mutableListOf<GazeSample>()
@@ -379,22 +423,22 @@ private fun CalibrationRun(
             withTimeoutOrNull(2500) {
                 tracker.frames.filterNotNull().first { f ->
                     waitingForFace = !f.usable
-                    if (f.usable) f.features?.let { frames += it.regressors() }
+                    if (f.usable) f.features?.let { frames += it.regressors(); faceSizes += it.faceSize }
                     frames.size >= 24 // Arrête la collecte de cette cible
                 }
             }
             if (frames.size >= 8) medianFeatures(frames)?.let { samples += GazeSample(it, tx, ty) }
             val soFar = GazeCalibrationPlan.merge(previousSamples, samples)
-            if (soFar.size >= 6) GazeModel.fit(soFar)?.let { liveModel = it }
+            if (soFar.size >= 6) GazeModel.fit(soFar)?.let { liveModel = it; liveCorrection = GazeCorrection(faceSizes.sorted().getOrNull(faceSizes.size / 2)) }
         }
-        onFinished(samples)
+        onFinished(samples, faceSizes.sorted().getOrNull(faceSizes.size / 2))
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF263238))) {
         val (tx, ty) = targets[index]
         GazeTarget(tx, ty, collecting)
         liveModel?.let { m ->
-            val point by rememberGazePoint(tracker, m)
+            val point by rememberGazePoint(tracker, m, liveCorrection)
             GazeCursor(point)
         }
         Text(
@@ -414,13 +458,13 @@ private fun CalibrationRun(
 
 @Composable
 private fun CalibrationResult(
-    tracker: GazeTracker, pendingModel: GazeModel?,
+    tracker: GazeTracker, pendingModel: GazeModel?, pendingCorrection: GazeCorrection,
     mode: CalibrationMode, measured: Int, planned: Int, errorCm: Double?, checkCm: Double?, refinedFrom: Double?, enoughPoints: Boolean,
     onSave: () -> Unit, onRetry: () -> Unit, onRecheck: () -> Unit, onCancel: () -> Unit
 ) {
     // Rond orange : l'adulte peut regarder quelques pictos et juger par lui-même avant d'enregistrer
     pendingModel?.let { m ->
-        val point by rememberGazePoint(tracker, m)
+        val point by rememberGazePoint(tracker, m, pendingCorrection)
         GazeCursor(point)
     }
     Column(
@@ -470,19 +514,22 @@ private fun CalibrationResult(
  *    et ne se déplace que sur un vrai mouvement de l'œil.
  */
 @Composable
-fun rememberGazePoint(tracker: GazeTracker, model: GazeModel): State<Pair<Double, Double>?> {
-    val median = remember(model) { MedianWindow(5) }
-    val fixation = remember(model) { FixationFilter() }
-    val point = remember(model) { mutableStateOf<Pair<Double, Double>?>(null) }
-    LaunchedEffect(model) {
+fun rememberGazePoint(tracker: GazeTracker, model: GazeModel, correction: GazeCorrection = GazeCorrection()): State<Pair<Double, Double>?> {
+    val median = remember(model, correction) { MedianWindow(5) }
+    val faceSizes = remember(model, correction) { MedianWindow(9) }
+    val fixation = remember(model, correction) { FixationFilter() }
+    val point = remember(model, correction) { mutableStateOf<Pair<Double, Double>?>(null) }
+    LaunchedEffect(model, correction) {
         tracker.frames.filterNotNull().collect { f ->
             val feat = f.features
             if (f.usable && feat != null) {
-                val (x, y) = model.predict(median.add(feat.regressors()))
+                val (rx, ry) = model.predict(median.add(feat.regressors()))
+                // Distance différente de celle de la calibration : on corrige (taille du visage lissée sur 9 images)
+                val (x, y) = correction.apply(rx, ry, faceSizes.add(doubleArrayOf(feat.faceSize))[0])
                 val (sx, sy) = fixation.filter(clamp01(x), clamp01(y))
                 point.value = sx to sy
             } else if (!f.faceDetected) {
-                point.value = null; median.reset(); fixation.reset()
+                point.value = null; median.reset(); faceSizes.reset(); fixation.reset()
             }
         }
     }
@@ -509,13 +556,13 @@ fun GazeCursor(point: Pair<Double, Double>?) {
 /** Vérification : quelques cibles sur les pictos ; l'écart moyen entre le regard estimé et la cible est affiché en cm. */
 @Composable
 private fun VerificationRun(
-    tracker: GazeTracker, model: GazeModel, targets: List<Pair<Double, Double>>,
+    tracker: GazeTracker, model: GazeModel, correction: GazeCorrection, targets: List<Pair<Double, Double>>,
     widthCm: Double, heightCm: Double,
     title: String = "Vérification",
     onResult: ((Double?) -> Unit)? = null, // Si présent : renvoie la précision mesurée dès la fin (vérification automatique)
     onClose: () -> Unit
 ) {
-    val point by rememberGazePoint(tracker, model)
+    val point by rememberGazePoint(tracker, model, correction)
     var index by remember { mutableIntStateOf(0) }
     var resultCm by remember { mutableStateOf<Double?>(null) }
     var jitterCm by remember { mutableStateOf<Double?>(null) }
@@ -570,8 +617,8 @@ private fun VerificationRun(
  * exactement comme sur l'écran de Nina ; une case « sélectionnée » clignote en vert. Rien n'est activé pour de vrai.
  */
 @Composable
-private fun PictoTrial(tracker: GazeTracker, model: GazeModel, zones: List<NormRect>, dwellMs: Long, onClose: () -> Unit) {
-    val point by rememberGazePoint(tracker, model)
+private fun PictoTrial(tracker: GazeTracker, model: GazeModel, correction: GazeCorrection, zones: List<NormRect>, dwellMs: Long, onClose: () -> Unit) {
+    val point by rememberGazePoint(tracker, model, correction)
     val magnet = remember { GazeMagnet() }
     val dwell = remember { GazeDwell(dwellMs) }
     var current by remember { mutableStateOf<Int?>(null) }
@@ -617,5 +664,38 @@ private fun PictoTrial(tracker: GazeTracker, model: GazeModel, zones: List<NormR
             if (point == null) Text("Yeux non détectés", color = Color(0xFFC62828))
         }
         Button(onClick = onClose, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("Terminer") }
+    }
+}
+
+/**
+ * Recentrage à 1 point (3 secondes) : une étoile au centre ; l'écart entre le regard estimé et l'étoile
+ * devient un décalage appliqué ensuite partout. À faire en début de séance, ou quand le pointeur paraît décalé.
+ */
+@Composable
+private fun RecenterRun(
+    tracker: GazeTracker, model: GazeModel, correction: GazeCorrection, widthCm: Double, heightCm: Double,
+    onDone: (Double, Double) -> Unit, onClose: () -> Unit
+) {
+    val point by rememberGazePoint(tracker, model, correction)
+    var result by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        delay(1000)
+        val seen = mutableListOf<Pair<Double, Double>>()
+        repeat(20) { delay(100); point?.let { seen += it } }
+        if (seen.size < 6) { result = "Les yeux n'ont pas été vus assez longtemps : recommencez face à la tablette."; return@LaunchedEffect }
+        val mx = seen.map { it.first }.sorted()[seen.size / 2]; val my = seen.map { it.second }.sorted()[seen.size / 2]
+        val dx = 0.5 - mx; val dy = 0.5 - my
+        onDone(dx, dy)
+        result = "Recentrage fait : décalage corrigé de %.1f cm".format(kotlin.math.hypot(dx * widthCm, dy * heightCm))
+    }
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF263238))) {
+        if (result == null) GazeTarget(0.5, 0.5, collecting = false)
+        Text(
+            result ?: "Regarde l'étoile ⭐",
+            color = Color.White, fontSize = 22.sp, textAlign = TextAlign.Center,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 32.dp, start = 32.dp, end = 32.dp)
+        )
+        if (result != null) Button(onClick = onClose, modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("Terminer") }
+        else TextButton(onClick = onClose, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)) { Text("Annuler", color = Color.White) }
     }
 }

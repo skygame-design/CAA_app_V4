@@ -110,6 +110,20 @@ class GazeMathTest {
     }
 
     @Test
+    fun distanceCorrection_restoresPositionWhenSittingFurther() {
+        val c = GazeCorrection(refFaceSize = 0.19)
+        // Même distance : rien ne change
+        assertEquals(0.8, c.apply(0.8, 0.3, faceSize = 0.19).first, 1e-9)
+        // 1,4 fois plus loin (visage plus petit) : le modèle estime trop près du centre (0.5 + 0.3 / 1.4), on corrige
+        val (x, _) = c.apply(0.5 + 0.3 / 1.4, 0.5, faceSize = 0.19 / 1.4)
+        assertEquals(0.8, x, 1e-6)
+        // Valeurs aberrantes bornées ; décalage de recentrage ajouté
+        assertEquals(1.7, c.distanceRatio(0.01), 1e-9)
+        val shifted = GazeCorrection(0.19, offsetX = 0.02, offsetY = -0.03).apply(0.5, 0.5, 0.19)
+        assertEquals(0.52, shifted.first, 1e-9); assertEquals(0.47, shifted.second, 1e-9)
+    }
+
+    @Test
     fun notEnoughPoints_noModel() {
         val few = listOf(GazeSample(doubleArrayOf(0.0, 0.0), 0.5, 0.5), GazeSample(doubleArrayOf(1.0, 1.0), 0.6, 0.6))
         assertNull(GazeModel.fit(few))

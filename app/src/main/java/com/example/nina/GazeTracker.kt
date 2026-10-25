@@ -176,9 +176,12 @@ data class GazeProfile(
     val updatedAt: Long,
     val errorCm: Double?, // Erreur moyenne estimée (validation croisée), en cm sur l'écran
     val checkCm: Double? = null, // Erreur mesurée par la vérification juste après la calibration (plus réaliste)
-    val version: Int = 0 // GazeFeatures.FEATURE_VERSION au moment de la calibration
+    val version: Int = 0, // GazeFeatures.FEATURE_VERSION au moment de la calibration
+    val refFaceSize: Double? = null, // Taille du visage pendant la calibration (distance de référence)
+    val offsetX: Double = 0.0, val offsetY: Double = 0.0 // Décalage mesuré par le dernier recentrage
 ) {
     fun model() = GazeModel.fit(samples)
+    fun correction() = GazeCorrection(refFaceSize, offsetX, offsetY)
 }
 
 /** Enregistrement des profils de calibration et des réglages de la commande oculaire. */

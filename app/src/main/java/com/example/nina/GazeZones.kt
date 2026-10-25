@@ -72,12 +72,13 @@ fun Modifier.gazeZone(key: String, enabled: Boolean = true, onActivate: () -> Un
 fun GazeSelectionOverlay(
     tracker: GazeTracker,
     model: GazeModel,
+    correction: GazeCorrection,
     registry: GazeZoneRegistry,
     selectionEnabled: Boolean,
     dwellMs: Long,
     showRawPoint: Boolean
 ) {
-    val point by rememberGazePoint(tracker, model)
+    val point by rememberGazePoint(tracker, model, correction)
     val magnet = remember { GazeMagnet() }
     val dwell = remember { GazeDwell() }
     var currentKey by remember { mutableStateOf<String?>(null) }

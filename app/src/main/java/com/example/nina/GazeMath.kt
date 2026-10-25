@@ -330,6 +330,29 @@ class FixationFilter(private val radius: Double = 0.07, private val jumpFrames: 
     fun reset() { points.clear(); outside.clear() }
 }
 
+/**
+ * Correction de distance et de décalage, appliquée après le modèle de regard.
+ * Le modèle est appris à une distance donnée : si l'enfant s'éloigne, ses yeux tournent moins pour regarder
+ * le même picto, et le regard estimé se rapproche du centre de l'écran (et inversement s'il s'approche).
+ * On écarte donc le point du centre en proportion de la distance (la taille du visage dans l'image varie
+ * comme l'inverse de la distance), puis on ajoute le décalage mesuré par le recentrage à 1 point.
+ *
+ * @param refFaceSize taille du visage pendant la calibration (null : pas de correction de distance)
+ */
+data class GazeCorrection(val refFaceSize: Double? = null, val offsetX: Double = 0.0, val offsetY: Double = 0.0) {
+    /** Rapport de distance actuelle / distance de calibration (1 = même distance), borné pour rester prudent. */
+    fun distanceRatio(faceSize: Double): Double =
+        if (refFaceSize == null || faceSize <= 0.0) 1.0 else (refFaceSize / faceSize).coerceIn(0.6, 1.7)
+
+    fun apply(x: Double, y: Double, faceSize: Double, centerX: Double = 0.5, centerY: Double = 0.5): Pair<Double, Double> {
+        val k = distanceRatio(faceSize)
+        return (centerX + (x - centerX) * k + offsetX) to (centerY + (y - centerY) * k + offsetY)
+    }
+
+    /** Sans le décalage de recentrage (pour mesurer un nouveau décalage). */
+    fun withoutOffset() = copy(offsetX = 0.0, offsetY = 0.0)
+}
+
 /** Positions des cibles de calibration (coordonnées normalisées), dans l'ordre d'affichage. */
 object GazeTargets {
     val calibration9 = listOf(0.5 to 0.5, 0.08 to 0.1, 0.5 to 0.1, 0.92 to 0.1, 0.92 to 0.5, 0.92 to 0.9, 0.5 to 0.9, 0.08 to 0.9, 0.08 to 0.5)
