@@ -17,3 +17,6 @@ local.properties
 
 # Copies des données de la tablette (grilles, photos, réglages) : restent sur le PC
 /sauvegardes_tablette
+
+# Fichiers d'installation envoyés (APK)
+/livraison
