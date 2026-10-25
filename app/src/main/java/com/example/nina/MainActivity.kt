@@ -65,6 +65,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     private var tts: TextToSpeech? = null
+    // Enregistrement des grilles dans la tablette
+    private val storage by lazy { NinaStorage(this) }
     // Zones regardables de l'écran (pictos, Accueil, Play…) pour la commande oculaire
     private val gazeRegistry = GazeZoneRegistry()
     private var ttsReady = false
@@ -103,7 +105,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     
                     // Listes principales des pictogrammes
                     // Chargement unique au démarrage (avec récupération depuis une sauvegarde si besoin)
-                    val initial = remember { loadAll() }
+                    val initial = remember { storage.loadAll() }
                     var loadNotice by remember { mutableStateOf(initial.recoveredFrom != null || initial.lost) }
                     val boutons = remember { mutableStateListOf<AACCell>().apply { addAll(initial.layout.buttons) } }
                     val phrase = remember { mutableStateListOf<AACCell>() }
@@ -203,7 +205,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     // puis enregistre : les pictos restent visibles hors réseau
                     suspend fun fetchAndSaveImages() {
                         withContext(Dispatchers.IO) { updateCellsWithImages(context, boutons, coreWords, quickFires) }
-                        saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
+                        storage.saveAll(boutons, coreWords, quickFires)
                     }
 
                     // Grilles prêtes : sauvegarde de l'ancienne disposition pour pouvoir revenir en arrière
@@ -252,7 +254,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         boutons.clear(); boutons.addAll(layout.buttons)
                         coreWords.clear(); coreWords.addAll(layout.coreWords.orEmpty())
                         quickFires.clear(); quickFires.addAll(layout.quickFires.orEmpty())
-                        saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
+                        storage.saveAll(boutons, coreWords, quickFires)
                         gridPage = 0; leftPage = 0; rightPage = 0
                         // Les nouveaux pictos vont chercher leur image ARASAAC
                         scope.launch { fetchAndSaveImages() }
@@ -263,10 +265,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     // Grille récupérée (données illisibles) : on garde une copie des données abîmées, puis on enregistre la grille récupérée
                     LaunchedEffect(Unit) {
                         if (initial.recoveredFrom != null || initial.lost) {
-                            withContext(Dispatchers.IO) { keepUnreadableData() }
-                            saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
+                            withContext(Dispatchers.IO) { storage.keepUnreadableData() }
+                            storage.saveAll(boutons, coreWords, quickFires)
                         } else {
-                            withContext(Dispatchers.IO) { autoBackupNow() } // Sauvegarde du jour dès l'ouverture
+                            withContext(Dispatchers.IO) { storage.autoBackupNow() } // Sauvegarde du jour dès l'ouverture
                         }
                     }
 
@@ -284,7 +286,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     boutons.clear(); boutons.addAll(backup.buttons)
                                     backup.coreWords?.let { list -> coreWords.clear(); coreWords.addAll(list) }
                                     backup.quickFires?.let { list -> quickFires.clear(); quickFires.addAll(list) }
-                                    saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
+                                    storage.saveAll(boutons, coreWords, quickFires)
                                 } catch (e: Exception) {
                                     Log.e("Nina-Debug", "Restauration impossible", e)
                                     android.widget.Toast.makeText(context, "Fichier de sauvegarde invalide", android.widget.Toast.LENGTH_LONG).show()
@@ -334,14 +336,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         if (sidebarRect.contains(screenPos)) {
                             if (!coreWords.any { it.label == droppedCell.label }) {
                                 coreWords.add(droppedCell.copy(id = newCellId(), isQuickPhrase = false)) // Copie : nouvel id
-                                saveCoreWords(coreWords)
+                                storage.saveCoreWords(coreWords)
                             }
                         } 
                         // 2. Est-ce qu'on lâche dans la barre de droite (Quick Fires) ?
                         else if (quickFiresRect.contains(screenPos)) {
                             if (!quickFires.any { it.label == droppedCell.label }) {
                                 quickFires.add(droppedCell.copy(id = newCellId(), isQuickPhrase = true)) // Copie : nouvel id
-                                saveQuickFires(quickFires)
+                                storage.saveQuickFires(quickFires)
                             }
                         }
                         else if (target != null && target != droppedCell) {
@@ -366,7 +368,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     }
                                     else -> {}
                                 }
-                                saveButtons(boutons)
+                                storage.saveButtons(boutons)
                             }
                         }
                         
@@ -480,7 +482,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                         else { act.startLockTask(); isKioskMode = true }
                                     }
                                 },
-                                onBackup = { shareBackupFile(context, NinaBackup(boutons, coreWords, quickFires)) },
+                                onBackup = { storage.shareBackupFile(NinaBackup(boutons, coreWords, quickFires)) },
                                 onRestore = { openDocLauncher.launch(arrayOf("application/json")) },
                                 onRecommendedLayout = { showRecommendedDialog = true },
                                 onAutoBackups = { showAutoBackups = true },
@@ -999,9 +1001,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         showAdminChallenge = showAdminChallengeDialog, onAdminSuccess = { isAdminMode = true; showAdminChallengeDialog = false }, onAdminDismiss = { showAdminChallengeDialog = false },
                         showAddDialog = showAddDialog, onAddDismiss = { showAddDialog = false; isAddingToCore = false; isAddingToQuickFires = false },
                         onAddConfirm = { nouveau ->
-                            if (isAddingToCore) { coreWords.add(nouveau); saveCoreWords(coreWords) }
-                            else if (isAddingToQuickFires) { quickFires.add(nouveau.copy(isQuickPhrase = true)); saveQuickFires(quickFires) }
-                            else { currentButtons.add(nouveau); saveButtons(boutons) }
+                            if (isAddingToCore) { coreWords.add(nouveau); storage.saveCoreWords(coreWords) }
+                            else if (isAddingToQuickFires) { quickFires.add(nouveau.copy(isQuickPhrase = true)); storage.saveQuickFires(quickFires) }
+                            else { currentButtons.add(nouveau); storage.saveButtons(boutons) }
                             showAddDialog = false; isAddingToCore = false; isAddingToQuickFires = false
                         },
                         showSettings = showSettingsDialog,
@@ -1034,9 +1036,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         },
                         showEditDialog = showEditDialog, cellToEdit = cellToEdit, allButtons = boutons,
                         onEditDelete = { targetCell ->
-                            if (coreWords.removeAll { it.id == targetCell.id }) saveCoreWords(coreWords)
-                            else if (quickFires.removeAll { it.id == targetCell.id }) saveQuickFires(quickFires)
-                            else { currentButtons.removeAll { it.id == targetCell.id }; saveButtons(boutons) }
+                            if (coreWords.removeAll { it.id == targetCell.id }) storage.saveCoreWords(coreWords)
+                            else if (quickFires.removeAll { it.id == targetCell.id }) storage.saveQuickFires(quickFires)
+                            else { currentButtons.removeAll { it.id == targetCell.id }; storage.saveButtons(boutons) }
                             showEditDialog = false
                         },
                         onEditSave = { edited, moveRequested, moveTarget ->
@@ -1052,7 +1054,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     if (moveRequested && updated != null) {
                                         moveCell(updated, moveTarget?.content ?: boutons, coreWords, currentButtons, quickFires)
                                     }
-                                    saveButtons(boutons); saveCoreWords(coreWords); saveQuickFires(quickFires)
+                                    storage.saveAll(boutons, coreWords, quickFires)
                                     showEditDialog = false
                                 }
                             }
@@ -1132,84 +1134,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         lifecycleScope.launch(Dispatchers.IO) { UsageLog.append(applicationContext, type, text, time) }
     }
 
-    private fun saveButtons(list: List<AACCell>) {
-        getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit()
-            .putString("saved_buttons", GsonInstance.gson.toJson(list)).apply()
-    }
-
-    /** Résultat du chargement au démarrage : la grille, et la date de la sauvegarde utilisée si on a dû récupérer. */
-    private class LoadResult(val layout: NinaBackup, val recoveredFrom: java.time.LocalDate?, val lost: Boolean)
-
-    /** Lit une liste de pictos enregistrée ; null si elle est absente, une exception si elle est abîmée. */
-    private fun readSavedList(key: String): List<AACCell>? {
-        val json = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).getString(key, null) ?: return null
-        return normalizeCells(GsonInstance.gson.fromJson<List<AACCell>>(json, object : TypeToken<List<AACCell>>() {}.type))
-    }
-
-    /**
-     * Charge la grille enregistrée. Premier lancement : la grille de départ.
-     * Données illisibles (fichier abîmé) : la dernière sauvegarde automatique, au lieu de tout réinitialiser sans prévenir.
-     */
-    private fun loadAll(): LoadResult {
-        return try {
-            val buttons = readSavedList("saved_buttons")
-            val core = readSavedList("saved_core_words")
-            val quick = readSavedList("saved_quick_fires")
-            if (buttons == null && core == null && quick == null) LoadResult(NinaBackup(getStarterPack(), getDefaultCoreWords(), getDefaultQuickFires()), null, false)
-            else LoadResult(NinaBackup(buttons ?: getStarterPack(), core ?: getDefaultCoreWords(), quick ?: getDefaultQuickFires()), null, false)
-        } catch (e: Exception) {
-            Log.e("Nina-Debug", "Grille enregistrée illisible", e)
-            val latest = AutoBackup.latest(this)
-            if (latest != null) LoadResult(latest.second, latest.first, false)
-            else LoadResult(NinaBackup(getStarterPack(), getDefaultCoreWords(), getDefaultQuickFires()), null, true)
-        }
-    }
-
-    /** Sauvegarde automatique du jour, à partir de ce qui est enregistré (seulement si c'est lisible). */
-    private fun autoBackupNow() {
-        val buttons = runCatching { readSavedList("saved_buttons") }.getOrNull() ?: return
-        val core = runCatching { readSavedList("saved_core_words") }.getOrNull()
-        val quick = runCatching { readSavedList("saved_quick_fires") }.getOrNull()
-        runCatching { AutoBackup.save(applicationContext, NinaBackup(buttons, core, quick)) }
-            .onFailure { Log.e("Nina-Debug", "Sauvegarde automatique impossible", it) }
-    }
-
-    /** Copie des données illisibles (pour pouvoir les examiner), avant qu'elles soient remplacées. */
-    private fun keepUnreadableData() {
-        val prefs = getSharedPreferences("nina_prefs", Context.MODE_PRIVATE)
-        val raw = listOf("saved_buttons", "saved_core_words", "saved_quick_fires").joinToString("\n\n") { "$it = ${prefs.getString(it, null)}" }
-        runCatching { File(File(filesDir, "sauvegardes").apply { mkdirs() }, "illisible_${System.currentTimeMillis()}.txt").writeText(raw) }
-    }
-
     // Quand on quitte l'app (ou qu'elle passe en arrière-plan) : sauvegarde automatique du jour
     override fun onStop() {
         super.onStop()
-        lifecycleScope.launch(Dispatchers.IO) { autoBackupNow() }
-    }
-
-    private fun saveCoreWords(list: List<AACCell>) {
-        getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit()
-            .putString("saved_core_words", GsonInstance.gson.toJson(list)).apply()
-    }
-
-    private fun saveQuickFires(list: List<AACCell>) {
-        getSharedPreferences("nina_prefs", Context.MODE_PRIVATE).edit()
-            .putString("saved_quick_fires", GsonInstance.gson.toJson(list)).apply()
-    }
-
-    private fun shareBackupFile(context: Context, backup: NinaBackup) {
-        try {
-            val file = File(context.cacheDir, "sauvegarde_nina.json")
-            // Les photos prises avec la tablette partent avec le fichier (sinon elles seraient perdues sur une autre tablette)
-            file.writeText(GsonInstance.gson.toJson(backup.withEmbeddedPhotos(context)))
-            val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = "application/json"
-                putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(android.content.Intent.createChooser(intent, "Sauvegarder la grille de Nina via :"))
-        } catch (e: Exception) { e.printStackTrace() }
+        lifecycleScope.launch(Dispatchers.IO) { storage.autoBackupNow() }
     }
 
     // Android réaffiche les barres après certaines actions (notification, retour dans l'app…) : on les remasque
@@ -1221,284 +1149,4 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onDestroy() {
         tts?.shutdown(); super.onDestroy()
     }
-
-    // --- PACK DE DÉMARRAGE (voir VocabularyPacks pour les grilles prêtes) ---
-
-    private fun getDefaultCoreWords() = VocabularyPacks.default.build().coreWords.orEmpty()
-    private fun getDefaultQuickFires() = VocabularyPacks.default.build().quickFires.orEmpty()
-    private fun getStarterPack(): List<AACCell> = VocabularyPacks.default.build().buttons
-}
-
-// --- SOUS-COMPOSANTS DÉPORTÉS (Pour lisibilité) ---
-
-/**
- * Cadenas discret en haut à droite : petit, gris, sans couleur vive pour ne pas attirer l'enfant.
- * Il faut le maintenir 2 secondes (un anneau se remplit) pour ouvrir le calcul du mode adulte.
- * Un simple appui affiche seulement « Maintenir 2 s ». Cadenas ouvert, un appui le referme.
- */
-@Composable
-fun HoldLockButton(isAdminMode: Boolean, onHoldComplete: () -> Unit, onLock: () -> Unit, warning: Boolean = false) {
-    if (isAdminMode) {
-        IconButton(onClick = onLock, modifier = Modifier.size(48.dp).background(Color(0xFFFFEB3B), CircleShape)) {
-            Icon(Icons.Default.LockOpen, contentDescription = "Verrouiller")
-        }
-        return
-    }
-
-    val scope = rememberCoroutineScope()
-    val progress = remember { androidx.compose.animation.core.Animatable(0f) }
-    var showHint by remember { mutableStateOf(false) }
-    LaunchedEffect(showHint) { if (showHint) { kotlinx.coroutines.delay(2000); showHint = false } }
-
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(48.dp)
-                .pointerInput(Unit) {
-                    detectTapGestures(onPress = {
-                        val hold = scope.launch {
-                            progress.snapTo(0f)
-                            progress.animateTo(1f, androidx.compose.animation.core.tween(2000, easing = androidx.compose.animation.core.LinearEasing))
-                            onHoldComplete()
-                            progress.snapTo(0f)
-                        }
-                        tryAwaitRelease()
-                        if (hold.isActive) {
-                            // Relâché trop tôt : on n'ouvre rien
-                            hold.cancel()
-                            scope.launch { progress.snapTo(0f) }
-                            showHint = true
-                        }
-                    })
-                }
-        ) {
-            CircularProgressIndicator(
-                progress = { progress.value },
-                modifier = Modifier.fillMaxSize(),
-                color = Color(0xFF4A5D91),
-                trackColor = Color.Transparent,
-                strokeWidth = 4.dp
-            )
-            Icon(Icons.Default.Lock, contentDescription = "Mode adulte (maintenir 2 secondes)", tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(22.dp))
-            // Point orange discret : un réglage demande l'attention d'un adulte (voir la barre du mode adulte)
-            if (warning) Box(modifier = Modifier.align(Alignment.TopEnd).size(10.dp).background(Color(0xFFFF6D00), CircleShape))
-        }
-        if (showHint) Text("Maintenir 2 s", fontSize = 11.sp, color = Color.Gray)
-    }
-}
-
-/**
- * Barre du mode adulte, en haut de l'écran : tous les outils au même endroit,
- * sans pousser les phrases rapides de la colonne de droite.
- */
-@Composable
-fun AdminToolbar(
-    showMore: Boolean, onMoreToggle: (Boolean) -> Unit,
-    isEditMode: Boolean, onEditModeToggle: (Boolean) -> Unit,
-    columnCount: Int, onColumnCountChange: (Int) -> Unit,
-    onAddToGrid: () -> Unit, onAddToLeft: () -> Unit, onAddToQuick: () -> Unit, onSettings: () -> Unit, onStats: () -> Unit, onHelp: () -> Unit,
-    onCalibration: () -> Unit, isKioskMode: Boolean, onKioskToggle: () -> Unit,
-    onBackup: () -> Unit, onRestore: () -> Unit,
-    onRecommendedLayout: () -> Unit, onRestorePreviousLayout: (() -> Unit)?, // null : rien à restaurer
-    onAutoBackups: () -> Unit,
-    onEyeGaze: () -> Unit,
-    onPrintBoard: () -> Unit,
-    voiceWarning: String?, onVoiceFix: () -> Unit, // null : la voix fonctionne hors ligne
-    onLock: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val accent = Color(0xFF4A5D91)
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(Color(0xFFFFF3C4))
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Icon(Icons.Default.LockOpen, contentDescription = null, tint = Color(0xFF8D6E00))
-        Text("Mode adulte", fontWeight = FontWeight.Bold, color = Color(0xFF5D4600), modifier = Modifier.padding(end = 8.dp))
-        // Problème de voix : bouton orange bien visible pour l'adulte, qui explique comment installer la voix
-        voiceWarning?.let { message ->
-            Button(
-                onClick = onVoiceFix,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6D00)),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(message)
-            }
-        }
-
-        // Ajouter : on choisit la zone (les colonnes n'ont pas de case « + » pour ne pas changer de disposition)
-        Box {
-            var showAddMenu by remember { mutableStateOf(false) }
-            AdminToolButton(Icons.Default.Add, "Ajouter", { showAddMenu = true })
-            DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
-                DropdownMenuItem(text = { Text("Dans la grille (dossier ouvert)") }, onClick = { showAddMenu = false; onAddToGrid() })
-                DropdownMenuItem(text = { Text("Dans la colonne de gauche (dossiers)") }, onClick = { showAddMenu = false; onAddToLeft() })
-                DropdownMenuItem(text = { Text("Dans les phrases rapides") }, onClick = { showAddMenu = false; onAddToQuick() })
-            }
-        }
-        AdminToolButton(Icons.Default.Edit, if (isEditMode) "Édition : oui" else "Édition", { onEditModeToggle(!isEditMode) }, selected = isEditMode)
-        AdminToolButton(Icons.Default.Settings, "Paramètres", onSettings)
-        AdminToolButton(Icons.Default.BarChart, "Statistiques", onStats)
-        AdminToolButton(Icons.AutoMirrored.Filled.Help, "Aide", onHelp)
-
-        // Taille de la grille : pictos par rangée (1 à 8)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.background(Color.White, RoundedCornerShape(20.dp)).padding(horizontal = 4.dp)
-        ) {
-            IconButton(onClick = { if (columnCount > 1) onColumnCountChange(columnCount - 1) }, enabled = columnCount > 1) {
-                Icon(Icons.Default.Remove, contentDescription = "Moins de pictos par rangée")
-            }
-            Text("$columnCount par rangée", fontWeight = FontWeight.Bold, color = accent)
-            IconButton(onClick = { if (columnCount < 8) onColumnCountChange(columnCount + 1) }, enabled = columnCount < 8) {
-                Icon(Icons.Default.Add, contentDescription = "Plus de pictos par rangée")
-            }
-        }
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // Outils plus rares
-        Box {
-            IconButton(onClick = { onMoreToggle(true) }) { Icon(Icons.Default.MoreVert, contentDescription = "Plus d'outils") }
-            DropdownMenu(expanded = showMore, onDismissRequest = { onMoreToggle(false) }) {
-                DropdownMenuItem(text = { Text("👁 Commande oculaire…") }, onClick = { onMoreToggle(false); onEyeGaze() })
-                DropdownMenuItem(text = { Text("🎯 Calibrer le tactile") }, onClick = { onMoreToggle(false); onCalibration() })
-                DropdownMenuItem(text = { Text(if (isKioskMode) "🔓 Désactiver le mode Kiosque" else "🔒 Activer le mode Kiosque") }, onClick = { onMoreToggle(false); onKioskToggle() })
-                HorizontalDivider()
-                DropdownMenuItem(text = { Text("📤 Partager / Sauvegarder") }, onClick = { onMoreToggle(false); onBackup() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.btn_restore)) }, onClick = { onMoreToggle(false); onRestore() })
-                HorizontalDivider()
-                DropdownMenuItem(text = { Text("🗂 Sauvegardes automatiques…") }, onClick = { onMoreToggle(false); onAutoBackups() })
-                DropdownMenuItem(text = { Text("🧩 Grilles prêtes…") }, onClick = { onMoreToggle(false); onRecommendedLayout() })
-                DropdownMenuItem(text = { Text("🖨 Planche imprimable…") }, onClick = { onMoreToggle(false); onPrintBoard() })
-                onRestorePreviousLayout?.let { restore ->
-                    DropdownMenuItem(text = { Text("↩ Revenir à la disposition précédente") }, onClick = { onMoreToggle(false); restore() })
-                }
-            }
-        }
-
-        Button(onClick = onLock, colors = ButtonDefaults.buttonColors(containerColor = accent)) {
-            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Verrouiller")
-        }
-    }
-}
-
-@Composable
-private fun AdminToolButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, selected: Boolean = false) {
-    FilledTonalButton(
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-        colors = ButtonDefaults.filledTonalButtonColors(containerColor = if (selected) Color(0xFF4A5D91) else Color.White, contentColor = if (selected) Color.White else Color(0xFF4A5D91))
-    ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(label)
-    }
-}
-
-@Composable
-fun DialogManager(
-    showKeyboardDialog: Boolean, onKeyboardDismiss: () -> Unit, onKeyboardValidate: (AACCell) -> Unit,
-    showAdminChallenge: Boolean, onAdminSuccess: () -> Unit, onAdminDismiss: () -> Unit,
-    showAddDialog: Boolean, onAddDismiss: () -> Unit, onAddConfirm: (AACCell) -> Unit,
-    showSettings: Boolean, currentBg: Long, currentPitch: Float, currentRate: Float, currentDebounce: Long, currentCviMode: Boolean, currentAutoReturn: Boolean,
-    onSettingsDismiss: () -> Unit, onSettingsSave: (Long, Float, Float, Long, Boolean, Boolean) -> Unit,
-    showHelp: Boolean, onHelpDismiss: () -> Unit,
-    showCalibration: Boolean, onCalibrationFinished: (Float, Float) -> Unit,
-    showWordFinder: Boolean, coreWords: List<AACCell>, quickFires: List<AACCell>, onWordFinderShow: (WordGuide) -> Unit, onWordFinderDismiss: () -> Unit,
-    showStats: Boolean, usageStats: Map<String, Int>, onStatsDismiss: () -> Unit, onStatsReset: () -> Unit,
-    showEditDialog: Boolean, cellToEdit: AACCell?, allButtons: List<AACCell>,
-    onEditDelete: (AACCell) -> Unit, onEditSave: (AACCell, Boolean, AACCell?) -> Unit, onEditDismiss: () -> Unit
-) {
-    if (showKeyboardDialog) KeyboardInputDialog(onDismiss = onKeyboardDismiss, onValidate = onKeyboardValidate)
-    if (showAdminChallenge) AdminChallengeDialog(onDismiss = onAdminDismiss, onSuccess = onAdminSuccess)
-    if (showAddDialog) AddButtonDialog(onDismiss = onAddDismiss, onConfirm = onAddConfirm)
-    if (showSettings) SettingsDialog(currentBg, currentPitch, currentRate, currentDebounce, currentCviMode, currentAutoReturn, onSettingsDismiss, onSettingsSave)
-    if (showHelp) HelpDialog(onDismiss = onHelpDismiss)
-    if (showCalibration) CalibrationTest(onFinished = onCalibrationFinished)
-    if (showWordFinder) WordFinderDialog(allButtons = allButtons, coreWords = coreWords, quickFires = quickFires, onShow = onWordFinderShow, onDismiss = onWordFinderDismiss)
-    if (showStats) StatsDialog(stats = usageStats, onDismiss = onStatsDismiss, onReset = onStatsReset)
-    if (showEditDialog && cellToEdit != null) EditDialog(cellToEdit, allFolders(allButtons, coreWords), onDelete = onEditDelete, onSave = onEditSave, onDismiss = onEditDismiss)
-}
-
-// Fonctions privées de logique
-/**
- * Prépare les images pour un usage hors réseau :
- * 1. les pictos marqués "FETCH" reçoivent la première image ARASAAC trouvée pour leur libellé ;
- * 2. toute image encore sur le web est téléchargée dans la tablette (fichier nommé d'après l'id du picto).
- * En cas d'échec (pas de réseau), l'adresse web est gardée et on réessaiera au prochain démarrage.
- */
-private suspend fun updateCellsWithImages(context: Context, vararg lists: MutableList<AACCell>) {
-    lists.forEach { list ->
-        list.forEachIndexed { i, original ->
-            var cell = original
-            // Fichier local disparu (sauvegarde restaurée sur une autre tablette) : on repart de l'adresse d'origine
-            val local = cell.imageUrl
-            if (local != null && local.startsWith("/") && !java.io.File(local).exists() && cell.sourceUrl != null) {
-                cell = cell.copy(imageUrl = cell.sourceUrl)
-            }
-            if (isRemoteImage(cell.imageUrl)) {
-                val remote = cell.imageUrl!!
-                saveImageLocally(context, remote, "picto_${cell.id}")?.let { path -> cell = cell.copy(imageUrl = path, sourceUrl = remote) }
-            }
-            // Pas encore d'image, ou image ARASAAC introuvable (certains pictos de la recherche n'ont pas de fichier) :
-            // on essaie les résultats ARASAAC suivants pour ce mot, jusqu'à en trouver un qui se télécharge
-            val stillRemote = cell.imageUrl
-            if (stillRemote == "FETCH" || (stillRemote != null && stillRemote.startsWith("https://static.arasaac.org/"))) {
-                try {
-                    val candidates = RetrofitInstance.arasaacApi.searchPictograms(cell.label.lowercase())
-                        .map { PictoSearch.arasaacUrl(it._id) }
-                        .filter { it != stillRemote }
-                        .take(5)
-                    for (url in candidates) {
-                        val path = saveImageLocally(context, url, "picto_${cell.id}")
-                        if (path != null) { cell = cell.copy(imageUrl = path, sourceUrl = url); break }
-                    }
-                } catch (_: Exception) {} // Pas de réseau : on réessaiera au prochain démarrage
-            }
-            if (cell !== original && i < list.size && list[i].id == original.id) list[i] = cell
-            if (cell.isFolder) updateCellsWithImages(context, cell.content)
-        }
-    }
-}
-
-/** Image actuelle du picto (avant modification), pour savoir si l'utilisateur l'a changée. */
-private fun targetCellImage(cell: AACCell, vararg lists: List<AACCell>): String? =
-    lists.firstNotNullOfOrNull { list -> list.firstOrNull { it.id == cell.id } }?.imageUrl
-
-/** Position d'un picto dans la liste, retrouvé par son id (même s'il a été modifié entre-temps). */
-private fun List<AACCell>.indexOfCell(cell: AACCell): Int = indexOfFirst { it.id == cell.id }
-
-/**
- * Remplace le picto de même id par sa version modifiée, dans la liste où il se trouve.
- * Renvoie la version modifiée, ou null si le picto n'a pas été trouvé.
- */
-private fun replaceCellInLists(edited: AACCell, vararg lists: MutableList<AACCell>): AACCell? {
-    var found = false
-    lists.forEach { list ->
-        val idx = list.indexOfCell(edited)
-        if (idx != -1) {
-            list[idx] = edited
-            found = true
-        }
-    }
-    return if (found) edited else null
-}
-
-/**
- * Retire la cellule de la liste où elle se trouve (grille, Core Words ou Quick Fires) et l'ajoute à la destination.
- */
-private fun moveCell(cell: AACCell, destination: MutableList<AACCell>, vararg sources: MutableList<AACCell>) {
-    val source = sources.firstOrNull { it.indexOfCell(cell) != -1 } ?: return
-    if (source === destination) return
-    source.removeAt(source.indexOfCell(cell))
-    destination.add(cell)
 }
