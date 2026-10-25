@@ -1604,6 +1604,8 @@ private data class HelpRows(val title: String?, val rows: List<Pair<String, Stri
 private data class HelpTip(val text: String, val isNew: Boolean = false) : HelpBlock
 private data class HelpColors(val colors: List<Pair<Long, String>>) : HelpBlock
 private data object HelpScreenMap : HelpBlock
+/** Nom, version (lue dans l'application installée) et copyright. */
+private data object HelpAbout : HelpBlock
 
 private data class HelpTopic(
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -1951,6 +1953,10 @@ private val helpTopics = listOf(
             HelpText("Recherche fournie par globalsymbols.com et opensymbols.org. « NC » signifie usage non commercial : parfait pour un usage personnel ou thérapeutique, mais pas pour vendre l'application."),
             HelpTip("Si une banque ne répond pas, les autres s'affichent quand même. Sans réseau, la recherche est impossible, mais tous les pictos déjà créés restent visibles.")
         )
+    ),
+    HelpTopic(
+        Icons.Default.Info, "À propos", "Version et copyright",
+        blocks = listOf(HelpAbout)
     )
 )
 
@@ -2073,6 +2079,26 @@ private fun NewBadge() {
 private fun HelpBlockView(block: HelpBlock) {
     when (block) {
         is HelpText -> Text(block.text, fontSize = 17.sp, lineHeight = 26.sp, color = Color(0xFF333333))
+
+        is HelpAbout -> {
+            val context = LocalContext.current
+            val version = remember {
+                runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?"
+            }
+            Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Nina", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = HelpAccent)
+                    Text("Communication alternative et améliorée (CAA)", fontSize = 17.sp, color = Color(0xFF333333))
+                    Text("Version $version", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF333333))
+                    Spacer(Modifier.height(8.dp))
+                    Text("© 2026 Skygame", fontSize = 14.sp, color = Color.Gray)
+                }
+            }
+        }
 
         is HelpSteps -> HelpCard(block.title) {
             block.steps.forEachIndexed { i, step ->
