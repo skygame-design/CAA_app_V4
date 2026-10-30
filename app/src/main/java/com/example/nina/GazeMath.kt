@@ -306,8 +306,11 @@ class MedianWindow(private val size: Int = 5) {
  * @param radius rayon d'une fixation, en fraction de l'écran
  * @param jumpFrames nombre d'images consécutives hors du rayon pour accepter un déplacement (ignore les sauts isolés)
  * @param window nombre de points moyennés au plus dans une fixation (les plus récents)
+ * @param driftFrames petit déplacement à l'intérieur du rayon (vers une case voisine) : si les dernières images
+ *   se sont toutes décalées dans la même direction, le pointeur les rejoint aussitôt au lieu de glisser lentement
+ *   (le tremblement, lui, part dans tous les sens et se compense dans la moyenne)
  */
-class FixationFilter(var radius: Double = 0.07, private val jumpFrames: Int = 3, private val window: Int = 20) {
+class FixationFilter(var radius: Double = 0.07, private val jumpFrames: Int = 3, private val window: Int = 20, private val driftFrames: Int = 5) {
     private val points = ArrayDeque<Pair<Double, Double>>()
     private val outside = mutableListOf<Pair<Double, Double>>()
 
@@ -320,6 +323,12 @@ class FixationFilter(var radius: Double = 0.07, private val jumpFrames: Int = 3,
             outside.clear()
             points.addLast(x to y)
             while (points.size > window) points.removeFirst()
+            if (points.size > driftFrames * 2) {
+                val recent = points.takeLast(driftFrames)
+                val rx = recent.map { it.first }.average(); val ry = recent.map { it.second }.average()
+                val (ax, ay) = center()
+                if (hypot(rx - ax, ry - ay) > radius * 0.4) { points.clear(); points.addAll(recent) }
+            }
         } else {
             outside += x to y
             // Déplacement confirmé : les points hors du rayon sont proches les uns des autres → nouvelle fixation
@@ -545,9 +554,9 @@ class JitterEstimator(private val window: Int = 30, private val jumpLimit: Doubl
     /** Déplacement médian d'une image à l'autre, en fraction de l'écran (null : pas encore assez de mesures). */
     fun median(): Double? = if (steps.size < 10) null else steps.sorted()[steps.size / 2]
 
-    /** Rayon de fixation adapté : ≈ 0,06 quand c'est stable, jusqu'à 0,12 quand ça tremble beaucoup. */
+    /** Rayon de fixation adapté : ≈ 0,06 quand c'est stable, jusqu'à 0,09 (≈ 2 cm) quand ça tremble beaucoup. */
     fun fixationRadius(default: Double = 0.07): Double =
-        median()?.let { (0.045 + 1.8 * it).coerceIn(0.05, 0.12) } ?: default
+        median()?.let { (0.045 + 1.8 * it).coerceIn(0.05, 0.09) } ?: default
 
     fun reset() { steps.clear(); last = null }
 }

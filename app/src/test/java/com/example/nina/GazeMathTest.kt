@@ -103,6 +103,17 @@ class GazeMathTest {
     }
 
     @Test
+    fun fixationFilter_followsASmallMoveToANeighbourQuickly() {
+        // Fixation stable, puis le regard passe à une case voisine à 0,06 (à l'intérieur du rayon de 0,07)
+        val rnd = Random(21)
+        val f = FixationFilter(radius = 0.07)
+        repeat(30) { f.filter(0.30 + rnd.nextDouble(-0.01, 0.01), 0.40 + rnd.nextDouble(-0.01, 0.01)) }
+        var out = 0.0 to 0.0
+        repeat(6) { out = f.filter(0.36 + rnd.nextDouble(-0.01, 0.01), 0.40 + rnd.nextDouble(-0.01, 0.01)) } // ≈ 0,3 s à 20 images/s
+        assertTrue("rejoint la case voisine en 6 images : $out", hypot(out.first - 0.36, out.second - 0.40) < 0.015)
+    }
+
+    @Test
     fun medianWindow_dropsIsolatedSpikes() {
         val m = MedianWindow(5)
         listOf(1.0, 1.1, 0.9, 9.0, 1.0).forEach { m.add(doubleArrayOf(it)) }
@@ -220,7 +231,8 @@ class GazeMathTest {
             shaky.add(0.5 + rnd.nextDouble(-0.05, 0.05), 0.5 + rnd.nextDouble(-0.05, 0.05))
         }
         assertTrue("stable : ${calm.fixationRadius()}", calm.fixationRadius() < 0.06)
-        assertTrue("tremblant : ${shaky.fixationRadius()}", shaky.fixationRadius() > 0.10)
+        assertTrue("tremblant : ${shaky.fixationRadius()}", shaky.fixationRadius() > 0.08)
+        assertTrue("plafonné à 0,09", shaky.fixationRadius() <= 0.09)
         assertEquals(0.07, JitterEstimator().fixationRadius(), 1e-9) // Pas encore mesuré : valeur par défaut
     }
 
