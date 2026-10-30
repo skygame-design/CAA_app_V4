@@ -107,7 +107,8 @@ Nina peut être pilotée **par le regard**, avec la caméra frontale de la table
 - **Sélection par fixation** : un anneau se remplit sur la case regardée (durée réglable), avec un **aimant** vers la case la plus proche.
 - **Calibration continue** : chaque picto choisi améliore la calibration au fil de l'utilisation, et ce qui est appris est conservé.
 - **Pointeur plus stable** : les images où la paupière cache l'iris sont ignorées, et le lissage s'adapte au tremblement mesuré.
-- **Conseils de position** : la fenêtre Commande oculaire signale une tête trop penchée ou tournée, et une lumière trop faible.
+- **Recentrage automatique** : si le pointeur tombe toujours un peu trop haut ou trop bas, les pictos validés le recentrent peu à peu.
+- **Conseils de position** : la fenêtre Commande oculaire signale une tête trop penchée ou tournée, une position différente de celle de la calibration, et une lumière trop faible.
 - **Grille adaptée au regard** (moins de pictos, plus d'espace) et **sélection en deux temps** (zoom), en option.
 - **Interrupteur général** : désactivée, la caméra est éteinte ; réglages et calibration sont conservés.
 

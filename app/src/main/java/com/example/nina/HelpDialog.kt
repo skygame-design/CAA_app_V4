@@ -298,7 +298,8 @@ private val helpTopics = listOf(
                     "Anneau tolérant" to "un tremblement ou un passage entre deux cases met l'anneau en pause au lieu de le vider",
                     "Œil trop fermé" to "quand la paupière cache l'iris (regard très bas, fatigue), le pointeur reste immobile au lieu de sauter",
                     "Lissage automatique" to "le pointeur est lissé davantage quand il tremble, et reste réactif quand il est stable",
-                    "Position et lumière" to "la fenêtre Commande oculaire signale une tête trop penchée ou tournée, et une lumière trop faible"
+                    "Position et lumière" to "la fenêtre Commande oculaire signale une tête trop penchée ou tournée, une position différente de celle de la calibration, et une lumière trop faible",
+                    "Recentrage automatique" to "si le pointeur tombe toujours un peu trop haut ou trop bas, les pictos validés le recentrent peu à peu ; « Recentrer » remet ce réglage à zéro"
                 )
             ),
             HelpRows(

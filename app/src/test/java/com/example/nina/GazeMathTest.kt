@@ -245,6 +245,25 @@ class GazeMathTest {
     }
 
     @Test
+    fun verticalOffset_catchesUpWithAConstantShift_andIgnoresOutliers() {
+        val v = VerticalOffsetLearner()
+        // Le point estimé tombe toujours 0,08 trop bas (tête plus penchée qu'à la calibration)
+        repeat(15) { v.learn(0.5, 0.48 + 0.08 - v.offset, 0.5, 0.48) }
+        assertEquals(-0.08, v.offset, 0.01)
+        // Case visée très loin du point estimé : sans doute pas la case regardée, rien n'est appris
+        assertTrue(!v.learn(0.1, 0.1, 0.9, 0.9))
+        assertEquals(-0.08, v.offset, 0.01)
+    }
+
+    @Test
+    fun pitchDriftAdvice_comparesWithTheCalibrationPosition() {
+        assertNull(pitchDriftAdvice(-12.0, -9.0)) // 3° d'écart : position comparable
+        assertTrue(pitchDriftAdvice(-18.0, -9.0)!!.contains("plus penchée"))
+        assertTrue(pitchDriftAdvice(0.0, -9.0)!!.contains("plus levée"))
+        assertNull(pitchDriftAdvice(-30.0, null)) // Pas de référence (ancienne calibration)
+    }
+
+    @Test
     fun notEnoughPoints_noModel() {
         val few = listOf(GazeSample(doubleArrayOf(0.0, 0.0), 0.5, 0.5), GazeSample(doubleArrayOf(1.0, 1.0), 0.6, 0.6))
         assertNull(GazeModel.fit(few))

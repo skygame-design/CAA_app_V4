@@ -86,6 +86,7 @@ fun EyeGazeDialog(
     var plannedCount by remember { mutableIntStateOf(0) }
     var checkCm by remember { mutableStateOf<Double?>(null) } // Vérification faite juste après la calibration
     var pendingFaceSize by remember { mutableStateOf<Double?>(null) } // Distance (taille du visage) pendant la calibration
+    var pendingPitch by remember { mutableStateOf<Double?>(null) } // Inclinaison de la tête pendant la calibration
     var pendingCompensation by remember { mutableStateOf<HeadCompensation?>(null) } // Rotation de la tête, mesurée avant les cibles
     // Distance de référence de la calibration en cours : retouche = moyenne pondérée avec l'ancienne
     fun pendingRef(newPoints: Int): Double? {
@@ -148,7 +149,8 @@ fun EyeGazeDialog(
                         previousSamples = if (mode == CalibrationMode.REFINE) profile?.samples.orEmpty() else emptyList(),
                         previousModel = remember(profile) { profile?.model() },
                         previousCorrection = profile?.correction() ?: GazeCorrection(),
-                        onFinished = { samples, faceSize ->
+                        onFinished = { samples, faceSize, pitch ->
+                            pendingPitch = if (mode == CalibrationMode.REFINE) profile?.refPitch ?: pitch else pitch
                             plannedCount = targets.size
                             pendingFaceSize = faceSize
                             // Retouche : les nouvelles mesures remplacent les anciennes aux mêmes endroits, le reste est gardé
@@ -185,7 +187,7 @@ fun EyeGazeDialog(
                             // Nouvelle calibration : distance de référence mesurée, décalage remis à zéro
                             val saved = GazeProfile(
                                 GazeStore.profileName(tracker.fineIris), pendingSamples, System.currentTimeMillis(), error, checkCm, GazeFeatures.FEATURE_VERSION,
-                                refFaceSize = pendingRef(plannedCount), headCompensation = pendingCompensation
+                                refFaceSize = pendingRef(plannedCount), headCompensation = pendingCompensation, refPitch = pendingPitch
                             )
                             GazeStore.saveProfile(context, saved)
                             profile = saved
@@ -219,7 +221,7 @@ fun EyeGazeDialog(
                         tracker = tracker, model = model, correction = current.correction().withoutOffset(),
                         widthCm = widthCm, heightCm = heightCm,
                         onDone = { dx, dy ->
-                            val saved = current.copy(offsetX = dx, offsetY = dy)
+                            val saved = current.copy(offsetX = dx, offsetY = dy, autoOffsetY = 0.0)
                             GazeStore.saveProfile(context, saved)
                             profile = saved
                             onProfileChanged()
@@ -292,7 +294,8 @@ private fun GazeHome(
                             StatusLine(f.brightness > 0.25, "Lumière suffisante", "Trop sombre : éclairez le visage")
                             // Position de la tête et lumière : ce qui fait le plus trembler le pointeur
                             f.features?.let { feat ->
-                                val advice = postureAdvice(Math.toDegrees(feat.yaw), Math.toDegrees(feat.pitch), f.brightness)
+                                val advice = postureAdvice(Math.toDegrees(feat.yaw), Math.toDegrees(feat.pitch), f.brightness) +
+                                    listOfNotNull(pitchDriftAdvice(Math.toDegrees(feat.pitch), (profile?.refPitch ?: profile?.headCompensation?.pitch0)?.let { Math.toDegrees(it) }))
                                 if (advice.isEmpty()) StatusLine(true, "Tête bien en face, bonne lumière", "")
                                 else advice.forEach { StatusLine(false, "", it) }
                             }
@@ -531,7 +534,7 @@ private fun HeadMotionRun(tracker: GazeTracker, onFinished: (HeadCompensation?) 
 private fun CalibrationRun(
     tracker: GazeTracker, targets: List<Pair<Double, Double>>, compensation: HeadCompensation?,
     previousSamples: List<GazeSample>, previousModel: GazeModel?, previousCorrection: GazeCorrection,
-    onFinished: (List<GazeSample>, Double?) -> Unit, onCancel: () -> Unit
+    onFinished: (List<GazeSample>, Double?, Double?) -> Unit, onCancel: () -> Unit
 ) {
     var index by remember { mutableIntStateOf(0) }
     var collecting by remember { mutableStateOf(false) }
@@ -542,6 +545,7 @@ private fun CalibrationRun(
     var liveModel by remember { mutableStateOf(previousModel) }
     var liveCorrection by remember { mutableStateOf(previousCorrection) }
     val faceSizes = remember { mutableListOf<Double>() }
+    val pitches = remember { mutableListOf<Double>() }
 
     LaunchedEffect(targets) {
         val samples = mutableListOf<GazeSample>()
@@ -554,7 +558,7 @@ private fun CalibrationRun(
             withTimeoutOrNull(2500) {
                 tracker.frames.filterNotNull().first { f ->
                     waitingForFace = !f.usable
-                    if (f.usable) f.features?.let { frames += (compensation?.apply(it) ?: it).regressors(); faceSizes += it.faceSize }
+                    if (f.usable) f.features?.let { frames += (compensation?.apply(it) ?: it).regressors(); faceSizes += it.faceSize; pitches += it.pitch }
                     frames.size >= 24 // Arrête la collecte de cette cible
                 }
             }
@@ -562,7 +566,7 @@ private fun CalibrationRun(
             val soFar = GazeCalibrationPlan.merge(previousSamples, samples)
             if (soFar.size >= 6) GazeModel.fit(soFar, compensation = compensation)?.let { liveModel = it; liveCorrection = GazeCorrection(faceSizes.sorted().getOrNull(faceSizes.size / 2)) }
         }
-        onFinished(samples, faceSizes.sorted().getOrNull(faceSizes.size / 2))
+        onFinished(samples, faceSizes.sorted().getOrNull(faceSizes.size / 2), pitches.sorted().getOrNull(pitches.size / 2))
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF263238))) {

@@ -253,10 +253,15 @@ data class GazeProfile(
     val version: Int = 0, // GazeFeatures.FEATURE_VERSION au moment de la calibration
     val refFaceSize: Double? = null, // Taille du visage pendant la calibration (distance de référence)
     val offsetX: Double = 0.0, val offsetY: Double = 0.0, // Décalage mesuré par le dernier recentrage
-    val headCompensation: HeadCompensation? = null // Effet de la rotation de la tête, mesuré à la calibration
+    val headCompensation: HeadCompensation? = null, // Effet de la rotation de la tête, mesuré à la calibration
+    val refPitch: Double? = null, // Inclinaison de la tête (radians) pendant la calibration : position de référence
+    val autoOffsetY: Double = 0.0 // Recentrage vertical appris pendant l'utilisation (fraction de la hauteur d'écran)
 ) {
     fun model() = GazeModel.fit(samples, compensation = headCompensation)
-    fun correction() = GazeCorrection(refFaceSize, offsetX, offsetY)
+    /** Correction complète : distance, recentrage manuel et recentrage vertical appris. */
+    fun correction() = GazeCorrection(refFaceSize, offsetX, offsetY + autoOffsetY)
+    /** Sans le recentrage appris : l'écran principal l'applique lui-même, pour pouvoir l'ajuster sans tout relancer. */
+    fun baseCorrection() = GazeCorrection(refFaceSize, offsetX, offsetY)
 }
 
 /** Enregistrement des profils de calibration et des réglages de la commande oculaire. */

@@ -69,8 +69,8 @@ class GazeController(private val context: Context) {
      * la calibration en mémoire : sans ça, ouvrir puis fermer une fenêtre faisait repartir de l'ancienne copie,
      * et l'apprentissage suivant écrasait ce qui venait d'être appris.
      */
-    fun saveLearnedSamples(samples: List<GazeSample>) {
-        val updated = profile?.copy(samples = samples) ?: return
+    fun saveLearnedSamples(samples: List<GazeSample>, autoOffsetY: Double) {
+        val updated = profile?.copy(samples = samples, autoOffsetY = autoOffsetY) ?: return
         GazeStore.saveProfile(context, updated)
         profile = updated // Le modèle de départ ne change pas : la sélection en cours n'est pas interrompue
     }
@@ -106,13 +106,14 @@ fun GazeLayer(controller: GazeController, registry: GazeZoneRegistry, isAdminMod
     val model = controller.model
     if (controller.active && model != null) {
         GazeSelectionOverlay(
-            tracker = controller.tracker, model = model, correction = controller.profile?.correction() ?: GazeCorrection(), registry = registry,
+            tracker = controller.tracker, model = model, correction = controller.profile?.baseCorrection() ?: GazeCorrection(), registry = registry,
             selectionEnabled = controller.selectionEnabled && !isAdminMode && !anyDialogOpen,
             dwellMs = controller.dwellMs,
             showRawPoint = controller.cursorEnabled,
             learningEnabled = !isAdminMode && !anyDialogOpen,
             zoom = if (controller.twoStep) controller.zoom else null,
             samples = controller.profile?.samples.orEmpty(),
+            learnedOffsetY = controller.profile?.autoOffsetY ?: 0.0,
             onSamplesLearned = controller::saveLearnedSamples
         )
     }

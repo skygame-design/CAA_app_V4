@@ -570,3 +570,36 @@ fun postureAdvice(yawDeg: Double, pitchDeg: Double, brightness: Double): List<St
     if (kotlin.math.abs(yawDeg) > 15) add("Tête tournée : placez-vous bien en face de la tablette")
     if (brightness in 0.25..0.55) add("Lumière faible : la caméra ralentit, éclairez le visage de face")
 }
+
+/**
+ * Recentrage vertical automatique : à chaque picto validé, l'écart vertical entre le point estimé et le centre
+ * du picto est appris peu à peu (20 % à chaque fois). Il rattrape un décalage d'ensemble, par exemple la tête
+ * plus penchée qu'à la calibration, que la calibration continue (locale, picto par picto) corrige mal ailleurs.
+ */
+class VerticalOffsetLearner(
+    var offset: Double = 0.0,
+    private val rate: Double = 0.2,
+    private val maxResidual: Double = 0.15, // Au-delà : sans doute pas la case regardée, on n'apprend rien
+    private val maxOffset: Double = 0.12
+) {
+    /** @return true si l'exemple a été retenu */
+    fun learn(estX: Double, estY: Double, targetX: Double, targetY: Double): Boolean {
+        if (hypot(targetX - estX, targetY - estY) > maxResidual) return false
+        offset = (offset + rate * (targetY - estY)).coerceIn(-maxOffset, maxOffset)
+        return true
+    }
+}
+
+/** Écart d'inclinaison de la tête (degrés) au-delà duquel la position ne correspond plus à celle de la calibration. */
+const val PITCH_DRIFT_DEGREES = 7.0
+
+/** Conseil si la tête penche nettement plus (ou moins) qu'à la calibration ; null si la position est comparable. */
+fun pitchDriftAdvice(pitchDeg: Double, refPitchDeg: Double?): String? {
+    if (refPitchDeg == null) return null
+    val diff = pitchDeg - refPitchDeg
+    return when {
+        diff < -PITCH_DRIFT_DEGREES -> "Tête plus penchée qu'à la calibration (%.0f°) : relevez la tablette, ou recalibrez dans cette position".format(-diff)
+        diff > PITCH_DRIFT_DEGREES -> "Tête plus levée qu'à la calibration (%.0f°) : baissez la tablette, ou recalibrez dans cette position".format(diff)
+        else -> null
+    }
+}

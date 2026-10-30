@@ -117,7 +117,8 @@ fun GazeSelectionOverlay(
     showRawPoint: Boolean,
     learningEnabled: Boolean = selectionEnabled,
     samples: List<GazeSample> = emptyList(),
-    onSamplesLearned: (List<GazeSample>) -> Unit = {},
+    onSamplesLearned: (List<GazeSample>, Double) -> Unit = { _, _ -> },
+    learnedOffsetY: Double = 0.0, // Recentrage vertical déjà appris (enregistré dans la calibration)
     zoom: GazeZoom? = null // Non nul : sélection en deux temps
 ) {
     // Modèle qui s'enrichit pendant l'utilisation (repart de la calibration enregistrée si elle change)
@@ -125,7 +126,16 @@ fun GazeSelectionOverlay(
     var liveSamples by remember(model) { mutableStateOf(samples) }
     var liveModel by remember(model) { mutableStateOf(GazeModel.fit(samples, compensation = model.compensation) ?: model) }
     val snapshot = remember { GazeSnapshot() }
-    val point by rememberGazePoint(tracker, liveModel, correction, snapshot)
+    val rawPoint = rememberGazePoint(tracker, liveModel, correction, snapshot)
+    // Recentrage vertical automatique, appliqué ici pour pouvoir l'ajuster sans relancer les filtres du pointeur
+    val vertical = remember(model) { VerticalOffsetLearner(offset = learnedOffsetY) }
+    var verticalVersion by remember { mutableIntStateOf(0) }
+    val point by remember(vertical) {
+        derivedStateOf {
+            verticalVersion // Recalculé quand le recentrage change
+            rawPoint.value?.let { (x, y) -> x to clamp01(y + vertical.offset) }
+        }
+    }
     val (widthCm, heightCm) = screenSizeCm()
     val magnet = remember(widthCm, heightCm) {
         GazeMagnet().apply { minReach = GazeZoom.MIN_REACH_CM / heightCm; aspect = widthCm / heightCm }
@@ -169,12 +179,15 @@ fun GazeSelectionOverlay(
     fun learnFrom(c: Choice) {
         if (!learning) return
         if (hypot(c.estimated.first - c.rect.centerX, c.estimated.second - c.rect.centerY) > 0.15) return
-        val (mx, my) = correction.invert(c.rect.centerX, c.rect.centerY, c.faceSize)
+        vertical.learn(c.estimated.first, c.estimated.second, c.rect.centerX, c.rect.centerY)
+        verticalVersion++
+        // Point de calibration : là où le modèle doit viser pour que, recentrage compris, le pointeur tombe sur le picto
+        val (mx, my) = correction.invert(c.rect.centerX, c.rect.centerY - vertical.offset, c.faceSize)
         val updated = GazeCalibrationPlan.learn(liveSamples, GazeSample(c.regressors, mx, my))
         val refit = GazeModel.fit(updated, compensation = liveModel.compensation) ?: return
         liveSamples = updated; liveModel = refit
-        android.util.Log.i("Nina-Regard", "Calibration continue (%s) : %d points".format(c.key, updated.size))
-        onLearned(updated)
+        android.util.Log.i("Nina-Regard", "Calibration continue (%s) : %d points, recentrage vertical %.3f".format(c.key, updated.size, vertical.offset))
+        onLearned(updated, vertical.offset)
     }
     // Activation par le regard : on attend 2 s pour vérifier qu'elle n'est pas aussitôt effacée (⌫)
     var pending by remember { mutableStateOf<Pair<Choice, Long>?>(null) }
