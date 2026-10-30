@@ -201,8 +201,18 @@ fun GazeSelectionOverlay(
             magnet.reset(); dwell.reset()
             currentKey = null; currentRect = null; progress = 0f
         }
+        var lastDiagnostic = 0L
         snapshotFlow { point }.collect { p ->
             val now = android.os.SystemClock.uptimeMillis()
+            // Journal de réglage (toutes les 2 s) : où est le pointeur, quelle case, où en est la sélection
+            if (now - lastDiagnostic > 2000) {
+                lastDiagnostic = now
+                android.util.Log.d("Nina-Regard", "Sélection : point=%s, case=%s, anneau=%.0f %%, sélection=%s, zoom=%s, cases=%d, rayon=%.3f, œil fermé ignoré=%d".format(
+                    p?.let { "(%.2f ; %.2f)".format(it.first, it.second) } ?: "aucun", currentKey?.substringBefore("_") ?: "aucune",
+                    progress * 100, if (selectionEnabled) "oui" else "non",
+                    zoom?.let { if (it.active) "agrandi" else "attente (%.0f %%)".format(zoomProgress * 100) } ?: "non",
+                    registry.zones.size, snapshot.fixationRadius, snapshot.closedEyeSkipped))
+            }
             val z = zoom
             if (z != null && z.active && !selectionEnabled) z.active = false
             pending?.let { (choice, time) -> if (now - time > 2000) { pending = null; learnFrom(choice) } }

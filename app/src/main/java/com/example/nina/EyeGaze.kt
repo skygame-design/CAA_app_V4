@@ -642,6 +642,9 @@ private fun CalibrationResult(
 class GazeSnapshot {
     @Volatile var regressors: DoubleArray? = null
     @Volatile var faceSize: Double = 0.0
+    // Pour le journal de réglage : images ignorées (œil trop fermé) et rayon du filtre de fixation
+    @Volatile var closedEyeSkipped: Int = 0
+    @Volatile var fixationRadius: Double = 0.0
 }
 
 /**
@@ -667,7 +670,10 @@ fun rememberGazePoint(
         tracker.frames.filterNotNull().collect { f ->
             val feat = f.features
             // Œil trop fermé par rapport à l'habitude : l'iris est mal repéré, on garde le pointeur où il est
-            if (f.usable && feat != null && !opennessGate.accept(feat.meanOpenness)) return@collect
+            if (f.usable && feat != null && !opennessGate.accept(feat.meanOpenness)) {
+                snapshot?.let { it.closedEyeSkipped++ }
+                return@collect
+            }
             if (f.usable && feat != null) {
                 val m = currentModel
                 val smooth = feat.copy(yaw = yawFilter.filter(feat.yaw, f.timeMs), pitch = pitchFilter.filter(feat.pitch, f.timeMs))
@@ -680,6 +686,7 @@ fun rememberGazePoint(
                 // Filtre de fixation réglé sur le tremblement mesuré : large quand ça tremble, fin quand c'est stable
                 jitter.add(clamp01(x), clamp01(y))
                 fixation.radius = jitter.fixationRadius()
+                snapshot?.fixationRadius = fixation.radius
                 val (sx, sy) = fixation.filter(clamp01(x), clamp01(y))
                 point.value = sx to sy
             } else if (!f.faceDetected) {
