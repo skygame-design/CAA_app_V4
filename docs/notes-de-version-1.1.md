@@ -6,6 +6,18 @@ La version 1.1 s'installe **par-dessus la version 1.0** : les grilles, dossiers,
 
 ---
 
+## L'écran principal de Nina 1.1
+
+![Écran principal de Nina 1.1](images/ecran-principal-1.1.png)
+
+1. **Barre de phrase** : les mots choisis, avec leur image ; le bouton vert lit la phrase.
+2. **Colonne des dossiers**, avec Accueil toujours en haut.
+3. **Grille des mots essentiels**, toujours à la même place.
+4. **Phrases rapides**, dites immédiatement.
+5. **Cadenas** du mode adulte (à maintenir 2 secondes).
+
+---
+
 ## En bref
 
 > **Une nouvelle organisation de l'écran** : dossiers à gauche, mots essentiels toujours à la même place au centre, phrases rapides à droite. Plus aucun défilement.
