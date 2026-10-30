@@ -307,7 +307,7 @@ class MedianWindow(private val size: Int = 5) {
  * @param jumpFrames nombre d'images consécutives hors du rayon pour accepter un déplacement (ignore les sauts isolés)
  * @param window nombre de points moyennés au plus dans une fixation (les plus récents)
  */
-class FixationFilter(private val radius: Double = 0.07, private val jumpFrames: Int = 3, private val window: Int = 20) {
+class FixationFilter(var radius: Double = 0.07, private val jumpFrames: Int = 3, private val window: Int = 20) {
     private val points = ArrayDeque<Pair<Double, Double>>()
     private val outside = mutableListOf<Pair<Double, Double>>()
 
@@ -494,4 +494,70 @@ data class HeadCompensation(
             return kotlin.math.atan2(fx, fz) to kotlin.math.atan2(-fy, hypot(fx, fz))
         }
     }
+}
+
+/**
+ * Images où l'œil est trop fermé (paupière qui cache l'iris : regard très bas, fatigue, début de clignement) :
+ * l'iris y est mal repéré et le pointeur saute. Le seuil est propre à chaque personne : on compare l'ouverture
+ * à l'ouverture habituelle mesurée sur les dernières secondes (75e centile, peu sensible aux clignements).
+ * Regarder la rangée du bas ferme un peu l'œil (≈ −25 %) : ces images restent acceptées.
+ */
+class OpennessGate(private val ratio: Double = 0.55, private val window: Int = 90, private val warmup: Int = 15) {
+    private val recent = ArrayDeque<Double>()
+
+    /** Ouverture habituelle (null tant qu'il n'y a pas assez d'images). */
+    fun baseline(): Double? {
+        if (recent.size < warmup) return null
+        val sorted = recent.sorted()
+        return sorted[(sorted.size * 3 / 4).coerceAtMost(sorted.size - 1)]
+    }
+
+    /** @return true si l'image est utilisable (œil assez ouvert par rapport à l'habitude). */
+    fun accept(openness: Double): Boolean {
+        recent.addLast(openness)
+        while (recent.size > window) recent.removeFirst()
+        val base = baseline() ?: return true
+        return openness >= base * ratio
+    }
+
+    fun reset() = recent.clear()
+}
+
+/**
+ * Tremblement du pointeur : médiane des déplacements d'une image à l'autre (les vrais mouvements de l'œil,
+ * plus grands, sont ignorés). Sert à régler le filtre de fixation : large quand ça tremble, fin quand c'est stable.
+ */
+class JitterEstimator(private val window: Int = 30, private val jumpLimit: Double = 0.15) {
+    private val steps = ArrayDeque<Double>()
+    private var last: Pair<Double, Double>? = null
+
+    fun add(x: Double, y: Double) {
+        last?.let { (lx, ly) ->
+            val step = hypot(x - lx, y - ly)
+            if (step < jumpLimit) {
+                steps.addLast(step)
+                while (steps.size > window) steps.removeFirst()
+            }
+        }
+        last = x to y
+    }
+
+    /** Déplacement médian d'une image à l'autre, en fraction de l'écran (null : pas encore assez de mesures). */
+    fun median(): Double? = if (steps.size < 10) null else steps.sorted()[steps.size / 2]
+
+    /** Rayon de fixation adapté : ≈ 0,06 quand c'est stable, jusqu'à 0,12 quand ça tremble beaucoup. */
+    fun fixationRadius(default: Double = 0.07): Double =
+        median()?.let { (0.045 + 1.8 * it).coerceIn(0.05, 0.12) } ?: default
+
+    fun reset() { steps.clear(); last = null }
+}
+
+/** Conseils pour l'adulte d'après la position de la tête (degrés) et la lumière (0..1) ; vide si tout va bien. */
+fun postureAdvice(yawDeg: Double, pitchDeg: Double, brightness: Double): List<String> = buildList {
+    when {
+        pitchDeg < -15 -> add("Tête penchée vers le bas : relevez la tablette, caméra à hauteur des yeux")
+        pitchDeg > 15 -> add("Tête levée : baissez un peu la tablette")
+    }
+    if (kotlin.math.abs(yawDeg) > 15) add("Tête tournée : placez-vous bien en face de la tablette")
+    if (brightness in 0.25..0.55) add("Lumière faible : la caméra ralentit, éclairez le visage de face")
 }

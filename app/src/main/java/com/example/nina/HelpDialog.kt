@@ -295,7 +295,10 @@ private val helpTopics = listOf(
                     "Rotation de la tête" to "mesurée au début de la calibration, puis compensée : tourner un peu la tête ne fait plus dériver le pointeur",
                     "Calibration continue" to "chaque picto touché, ou choisi du regard sans être effacé aussitôt, devient un point de calibration : la calibration s'adapte à l'enfant au fil de l'utilisation, zone par zone",
                     "Petits boutons" to "dossiers, phrases rapides, Lire, ⌫ attirent le regard dans un rayon d'au moins 1,3 cm",
-                    "Anneau tolérant" to "un tremblement ou un passage entre deux cases met l'anneau en pause au lieu de le vider"
+                    "Anneau tolérant" to "un tremblement ou un passage entre deux cases met l'anneau en pause au lieu de le vider",
+                    "Œil trop fermé" to "quand la paupière cache l'iris (regard très bas, fatigue), le pointeur reste immobile au lieu de sauter",
+                    "Lissage automatique" to "le pointeur est lissé davantage quand il tremble, et reste réactif quand il est stable",
+                    "Position et lumière" to "la fenêtre Commande oculaire signale une tête trop penchée ou tournée, et une lumière trop faible"
                 )
             ),
             HelpRows(

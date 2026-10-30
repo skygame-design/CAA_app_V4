@@ -64,9 +64,15 @@ class GazeController(private val context: Context) {
         twoStep = GazeStore.twoStep(context)
     }
 
-    /** Calibration continue : les pictos choisis enrichissent la calibration (enregistrée sans relancer le suivi). */
+    /**
+     * Calibration continue : les pictos choisis enrichissent la calibration. Elle est enregistrée, et devient aussi
+     * la calibration en mémoire : sans ça, ouvrir puis fermer une fenêtre faisait repartir de l'ancienne copie,
+     * et l'apprentissage suivant écrasait ce qui venait d'être appris.
+     */
     fun saveLearnedSamples(samples: List<GazeSample>) {
-        profile?.let { GazeStore.saveProfile(context, it.copy(samples = samples)) }
+        val updated = profile?.copy(samples = samples) ?: return
+        GazeStore.saveProfile(context, updated)
+        profile = updated // Le modèle de départ ne change pas : la sélection en cours n'est pas interrompue
     }
 }
 

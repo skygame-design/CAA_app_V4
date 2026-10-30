@@ -290,6 +290,12 @@ private fun GazeHome(
                             StatusLine(f.faceDetected, "Visage détecté", "Aucun visage : placez-vous face à la tablette")
                             if (f.faceDetected) StatusLine(f.eyesOpen, "Yeux bien visibles", "Yeux fermés ou cachés")
                             StatusLine(f.brightness > 0.25, "Lumière suffisante", "Trop sombre : éclairez le visage")
+                            // Position de la tête et lumière : ce qui fait le plus trembler le pointeur
+                            f.features?.let { feat ->
+                                val advice = postureAdvice(Math.toDegrees(feat.yaw), Math.toDegrees(feat.pitch), f.brightness)
+                                if (advice.isEmpty()) StatusLine(true, "Tête bien en face, bonne lumière", "")
+                                else advice.forEach { StatusLine(false, "", it) }
+                            }
                             f.features?.let { feat ->
                                 // Taille du visage dans l'image (écart entre les coins extérieurs des yeux) :
                                 // mesuré sur la Galaxy Tab A9+ : ≈ 0,18 à 40 cm pour un adulte ; tolère ~25 à ~65 cm, et un visage d'enfant
@@ -652,12 +658,16 @@ fun rememberGazePoint(
     val median = remember(correction) { MedianWindow(5) }
     val faceSizes = remember(correction) { MedianWindow(9) }
     val fixation = remember(correction) { FixationFilter() }
+    val opennessGate = remember(correction) { OpennessGate() }
+    val jitter = remember(correction) { JitterEstimator() }
     val yawFilter = remember(correction) { OneEuroFilter(minCutoff = 0.3, beta = 1.0) }
     val pitchFilter = remember(correction) { OneEuroFilter(minCutoff = 0.3, beta = 1.0) }
     val point = remember(correction) { mutableStateOf<Pair<Double, Double>?>(null) }
     LaunchedEffect(tracker, correction) {
         tracker.frames.filterNotNull().collect { f ->
             val feat = f.features
+            // Œil trop fermé par rapport à l'habitude : l'iris est mal repéré, on garde le pointeur où il est
+            if (f.usable && feat != null && !opennessGate.accept(feat.meanOpenness)) return@collect
             if (f.usable && feat != null) {
                 val m = currentModel
                 val smooth = feat.copy(yaw = yawFilter.filter(feat.yaw, f.timeMs), pitch = pitchFilter.filter(feat.pitch, f.timeMs))
@@ -667,10 +677,14 @@ fun rememberGazePoint(
                 val faceSize = faceSizes.add(doubleArrayOf(feat.faceSize))[0]
                 val (x, y) = correction.apply(rx, ry, faceSize)
                 snapshot?.let { it.regressors = regs; it.faceSize = faceSize }
+                // Filtre de fixation réglé sur le tremblement mesuré : large quand ça tremble, fin quand c'est stable
+                jitter.add(clamp01(x), clamp01(y))
+                fixation.radius = jitter.fixationRadius()
                 val (sx, sy) = fixation.filter(clamp01(x), clamp01(y))
                 point.value = sx to sy
             } else if (!f.faceDetected) {
                 point.value = null; median.reset(); faceSizes.reset(); fixation.reset(); yawFilter.reset(); pitchFilter.reset()
+                jitter.reset()
                 snapshot?.regressors = null
             }
         }

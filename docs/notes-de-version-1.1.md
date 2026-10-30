@@ -105,11 +105,13 @@ Nina peut être pilotée **par le regard**, avec la caméra frontale de la table
 
 - **Calibration sur les pictos**, précédée d'une courte étape « tourne doucement la tête ».
 - **Sélection par fixation** : un anneau se remplit sur la case regardée (durée réglable), avec un **aimant** vers la case la plus proche.
-- **Calibration continue** : chaque picto choisi améliore la calibration au fil de l'utilisation.
+- **Calibration continue** : chaque picto choisi améliore la calibration au fil de l'utilisation, et ce qui est appris est conservé.
+- **Pointeur plus stable** : les images où la paupière cache l'iris sont ignorées, et le lissage s'adapte au tremblement mesuré.
+- **Conseils de position** : la fenêtre Commande oculaire signale une tête trop penchée ou tournée, et une lumière trop faible.
 - **Grille adaptée au regard** (moins de pictos, plus d'espace) et **sélection en deux temps** (zoom), en option.
 - **Interrupteur général** : désactivée, la caméra est éteinte ; réglages et calibration sont conservés.
 
-> La précision dépend beaucoup de l'éclairage et de la position de la tablette : en moyenne 1 à 2 cm. Elle ne remplace pas une commande oculaire infrarouge du commerce.
+> La précision dépend beaucoup de l'éclairage et de la position de la tablette : en moyenne 1 à 2 cm, moins de 1 cm dans de bonnes conditions après quelques minutes d'utilisation. Pour de meilleurs résultats : tablette à hauteur des yeux, visage bien éclairé de face. Elle ne remplace pas une commande oculaire infrarouge du commerce.
 
 ---
 

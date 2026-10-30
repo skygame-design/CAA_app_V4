@@ -121,8 +121,9 @@ fun GazeSelectionOverlay(
     zoom: GazeZoom? = null // Non nul : sélection en deux temps
 ) {
     // Modèle qui s'enrichit pendant l'utilisation (repart de la calibration enregistrée si elle change)
+    // Au retour à l'écran (après une fenêtre), on repart des derniers points appris, pas de la calibration d'origine
     var liveSamples by remember(model) { mutableStateOf(samples) }
-    var liveModel by remember(model) { mutableStateOf(model) }
+    var liveModel by remember(model) { mutableStateOf(GazeModel.fit(samples, compensation = model.compensation) ?: model) }
     val snapshot = remember { GazeSnapshot() }
     val point by rememberGazePoint(tracker, liveModel, correction, snapshot)
     val (widthCm, heightCm) = screenSizeCm()

@@ -202,6 +202,37 @@ class GazeMathTest {
     }
 
     @Test
+    fun opennessGate_dropsHalfClosedEyes_butKeepsLookingDown() {
+        val g = OpennessGate()
+        repeat(40) { assertTrue(g.accept(0.30 + (it % 5) * 0.01)) } // Ouverture habituelle ≈ 0,32
+        assertTrue("regard vers la rangée du bas (−25 %)", g.accept(0.24))
+        assertTrue("paupière qui cache l'iris", !g.accept(0.12))
+        // Au démarrage, rien n'est refusé (pas encore de référence)
+        assertTrue(OpennessGate().accept(0.05))
+    }
+
+    @Test
+    fun jitterEstimator_widensTheFixationRadiusWhenThePointerShakes() {
+        val rnd = Random(4)
+        val calm = JitterEstimator(); val shaky = JitterEstimator()
+        repeat(40) {
+            calm.add(0.5 + rnd.nextDouble(-0.003, 0.003), 0.5 + rnd.nextDouble(-0.003, 0.003))
+            shaky.add(0.5 + rnd.nextDouble(-0.05, 0.05), 0.5 + rnd.nextDouble(-0.05, 0.05))
+        }
+        assertTrue("stable : ${calm.fixationRadius()}", calm.fixationRadius() < 0.06)
+        assertTrue("tremblant : ${shaky.fixationRadius()}", shaky.fixationRadius() > 0.10)
+        assertEquals(0.07, JitterEstimator().fixationRadius(), 1e-9) // Pas encore mesuré : valeur par défaut
+    }
+
+    @Test
+    fun postureAdvice_warnsAboutHeadAndLight() {
+        assertTrue(postureAdvice(2.0, -5.0, 0.66).isEmpty())
+        assertTrue(postureAdvice(0.0, -20.0, 0.66).single().contains("relevez"))
+        assertTrue(postureAdvice(25.0, 0.0, 0.66).single().contains("en face"))
+        assertTrue(postureAdvice(0.0, 0.0, 0.46).single().contains("Lumière faible"))
+    }
+
+    @Test
     fun notEnoughPoints_noModel() {
         val few = listOf(GazeSample(doubleArrayOf(0.0, 0.0), 0.5, 0.5), GazeSample(doubleArrayOf(1.0, 1.0), 0.6, 0.6))
         assertNull(GazeModel.fit(few))
