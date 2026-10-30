@@ -4,6 +4,8 @@ Ce guide explique comment installer la **version 1.1** de Nina sur une tablette 
 
 Durée : environ 10 minutes. Aucun ordinateur n'est nécessaire : tout se fait sur la tablette.
 
+Sur les images, **les ronds orange numérotés montrent où toucher**, dans l'ordre des étapes. Les écrans peuvent être un peu différents sur votre tablette (couleurs, noms des boutons), mais les étapes restent les mêmes.
+
 ---
 
 ## En bref
@@ -26,7 +28,7 @@ Durée : environ 10 minutes. Aucun ordinateur n'est nécessaire : tout se fait s
 ### Ce qui change en 1.1
 - **Le cadenas** (en haut à droite) est maintenant petit et gris : il faut **le maintenir appuyé 2 secondes** pour ouvrir le mode adulte, puis résoudre le calcul.
 - **Le mode adulte** affiche une **barre d'outils en haut de l'écran** : Ajouter, Édition, Paramètres, Statistiques, Aide, taille de la grille, et un menu **⋮** pour le reste (sauvegarde, restauration, grilles prêtes…).
-- **La colonne de gauche** contient maintenant les **dossiers** (Actions, Nourriture, Personnes…), avec **🏠 Accueil** toujours en haut. Si vous n'aviez pas modifié la colonne de gauche en 1.0, elle est remplacée par ces nouveaux dossiers. Vos propres dossiers restent dans la grille, à leur place.
+- **La colonne de gauche** contient maintenant les **dossiers** (Actions, Nourriture, Personnes…), avec **Accueil** toujours en haut. Si vous n'aviez pas modifié la colonne de gauche en 1.0, elle est remplacée par ces nouveaux dossiers. Vos propres dossiers restent dans la grille, à leur place.
 - **La taille de la grille** (nombre de pictos par rangée) n'était pas mémorisée en 1.0 : vérifiez-la après la mise à jour avec les boutons **− / +** de la barre du mode adulte.
 - **La grille ne défile plus** : s'il y a trop de pictos, des boutons **◀ Page ▶** apparaissent en bas.
 - Nouveautés : photos prises directement avec la tablette, planche imprimable, formes des verbes par appui long, aide entièrement refaite (**Aide**, dans la barre du mode adulte).
@@ -44,16 +46,26 @@ Durée : environ 10 minutes. Aucun ordinateur n'est nécessaire : tout se fait s
 
 ## 3. Étape 1 : faire une sauvegarde de sécurité (5 minutes)
 
-Normalement, la mise à jour ne touche à rien. Cette sauvegarde sert seulement de filet de sécurité si quelque chose tournait mal.
+Normalement, la mise à jour ne touche à rien. Cette sauvegarde sert seulement de filet de sécurité si quelque chose tournait mal. Tout se passe dans **Nina 1.0**.
 
-Dans **Nina 1.0** :
+![Le cadenas vert de Nina 1.0{48}](images/tuto/01-cadenas-1.0.png)
 
 1. Touchez le **cadenas vert** en haut à droite.
-2. Résolvez le petit calcul, puis touchez **Valider**. Le cadenas devient jaune.
-3. Touchez le bouton **⋮** (trois points) juste en dessous.
-4. Choisissez **📤 Partager / Sauvegarder**.
-5. Envoyez le fichier **`sauvegarde_nina.json`** vers un endroit sûr : par exemple **par mail à vous-même**, ou dans **Google Drive**.
-6. Revenez dans Nina et touchez le **cadenas jaune** pour le refermer.
+
+![Le calcul de sécurité{60}](images/tuto/02-calcul.png)
+
+2. Tapez le résultat du petit calcul.
+3. Touchez **Valider**. Le cadenas devient jaune.
+
+![Le menu de Nina 1.0{42}](images/tuto/03-menu-1.0.png)
+
+4. Touchez le bouton **⋮** (trois points), juste sous le cadenas.
+5. Choisissez **Partager / Sauvegarder**.
+
+![Envoyer la sauvegarde{62}](images/tuto/04-partage.png)
+
+6. Choisissez où envoyer le fichier **`sauvegarde_nina.json`** : **Gmail** pour vous l'envoyer par mail, ou **Drive** pour le ranger dans Google Drive.
+7. Revenez dans Nina et touchez le **cadenas jaune** pour le refermer.
 
 > Ce fichier contient vos grilles et vos dossiers. Les **photos de la galerie** n'y sont pas incluses en version 1.0 : elles restent sur la tablette et seront conservées par la mise à jour, mais pas par ce fichier de secours.
 
@@ -69,20 +81,30 @@ Ouvrez le message (mail, WhatsApp…) qui contient **`Nina-1.1.apk`** et **tél�
 
 ## 5. Étape 3 : installer la mise à jour
 
-1. Ouvrez l'application **Mes fichiers** (Samsung) ou **Fichiers** (autres tablettes), puis le dossier **Téléchargements**.
-2. Touchez **`Nina-1.1.apk`**.
-3. **La première fois**, Android bloque l'installation et affiche un message du type *« Pour votre sécurité, votre tablette n'est pas autorisée à installer des applications inconnues de cette source »* :
-   - touchez **Paramètres** ;
-   - activez **Autoriser à partir de cette source** ;
-   - revenez en arrière avec la flèche ← : l'installation reprend.
-4. Android affiche **« Voulez-vous mettre à jour cette application ? »** (ou *« Voulez-vous installer une mise à jour de cette application existante ? Vos données existantes ne seront pas perdues. »*).
-   ✅ **C'est le bon signe** : il s'agit d'une mise à jour, vos données sont conservées. Touchez **Mettre à jour**.
-5. Si **Google Play Protect** affiche *« Application non sécurisée bloquée »* ou *« Appli inconnue »* :
-   - touchez **Plus de détails**, puis **Installer quand même** ;
-   - ce message apparaît pour toute application qui ne vient pas du Play Store. Si on vous propose d'**envoyer l'appli pour analyse**, vous pouvez refuser.
+![Le fichier Nina-1.1.apk dans Téléchargements{70}](images/tuto/05-telechargements.png)
+
+1. Ouvrez l'application **Mes fichiers** (Samsung) ou **Fichiers** (autres tablettes), puis le dossier **Téléchargements**, et touchez **`Nina-1.1.apk`**.
+
+![Installation bloquée la première fois{70}](images/tuto/06-bloque.png)
+
+2. **La première fois**, Android bloque l'installation par sécurité. C'est normal : touchez **Paramètres**.
+
+![Autoriser l'installation{90}](images/tuto/07-autoriser.png)
+
+3. Activez **Autoriser depuis cette source** (ou *Autoriser à partir de cette source*), puis revenez en arrière avec la flèche **←** en haut à gauche. Retouchez **`Nina-1.1.apk`** si l'installation ne reprend pas toute seule.
+
+![Mettre à jour l'application{70}](images/tuto/08-mettre-a-jour.png)
+
+4. Android demande **« Voulez-vous mettre à jour cette appli ? »**.
+5. **C'est le bon signe** : il s'agit d'une mise à jour, vos données sont conservées. Touchez **Mettre à jour**.
+
+![Application installée{70}](images/tuto/09-installee.png)
+
 6. Attendez le message **« Application installée »**, puis touchez **Ouvrir**.
 
-> ⚠️ **Si Android propose « Installer » au lieu de « Mettre à jour »**, ou affiche une erreur comme *« Application non installée »* ou *« L'application est en conflit avec un package existant »* : **arrêtez-vous et ne désinstallez rien.** Vos données sont intactes. Voir la section 8.
+> Si **Google Play Protect** affiche *« Application non sécurisée bloquée »* ou *« Appli inconnue »* : touchez **Plus de détails**, puis **Installer quand même**. Ce message apparaît pour toute application qui ne vient pas du Play Store. Si on vous propose d'**envoyer l'appli pour analyse**, vous pouvez refuser.
+
+> Attention : **si Android propose « Installer » au lieu de « Mettre à jour »**, ou affiche une erreur comme *« Application non installée »* ou *« L'application est en conflit avec un package existant »* : **arrêtez-vous et ne désinstallez rien.** Vos données sont intactes. Voir la section 8.
 
 ---
 
@@ -96,9 +118,17 @@ Ouvrez Nina :
 
 Puis ouvrez le **mode adulte** pour vérifier la version :
 
-1. **Maintenez le doigt 2 secondes** sur le **petit cadenas gris** en haut à droite : un anneau se remplit.
-2. Résolvez le calcul, puis touchez **Valider**.
-3. Dans la barre jaune en haut, touchez **Aide**, puis la dernière rubrique **À propos** : elle doit afficher **Version 1.1**.
+![Maintenir le cadenas 2 secondes{48}](images/tuto/10-cadenas-1.1.png)
+
+1. **Maintenez le doigt 2 secondes** sur le **petit cadenas gris** en haut à droite : un anneau bleu se remplit. Puis résolvez le calcul et touchez **Valider**, comme à l'étape 1.
+
+![La barre du mode adulte{90}](images/tuto/11-barre-adulte.png)
+
+2. Dans la barre jaune en haut de l'écran, touchez **Aide**.
+
+![Aide et Tutoriel, rubrique À propos{85}](images/tuto/12-a-propos.png)
+
+3. Faites défiler la liste de gauche jusqu'en bas et touchez **À propos** : la page doit afficher **Version 1.1**.
 
 ---
 
@@ -121,10 +151,13 @@ En mode adulte (cadenas maintenu 2 secondes) :
 ### « Application non installée » ou « en conflit avec un package existant »
 Le fichier 1.1 n'a pas été fabriqué avec la même « signature » que votre version 1.0. **Rien n'a été modifié, vos grilles sont toujours là.**
 
-👉 **Le plus simple** : prévenez la personne qui vous a envoyé l'application. Elle pourra vous envoyer une version compatible.
+→ **Le plus simple** : prévenez la personne qui vous a envoyé l'application. Elle pourra vous envoyer une version compatible.
 
-👉 **Seulement si vous ne pouvez pas attendre**, et seulement si la sauvegarde de l'étape 1 est bien en lieu sûr :
-1. Désinstallez Nina : appui long sur l'icône › **Désinstaller**. ⚠️ Cela efface tout sur la tablette.
+→ **Seulement si vous ne pouvez pas attendre**, et seulement si la sauvegarde de l'étape 1 est bien en lieu sûr :
+
+![Le menu de la version 1.1, Restaurer{42}](images/tuto/13-menu-1.1.png)
+
+1. Désinstallez Nina : appui long sur l'icône › **Désinstaller**. Attention : cela efface tout sur la tablette.
 2. Installez `Nina-1.1.apk` (étape 3).
 3. Ouvrez Nina, maintenez le cadenas 2 secondes, résolvez le calcul.
 4. Touchez **⋮** (barre jaune, à droite) › **Restaurer**, puis choisissez le fichier `sauvegarde_nina.json` de l'étape 1 (dans **Téléchargements**, ou téléchargez-le d'abord depuis votre mail ou Drive).
